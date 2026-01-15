@@ -36,8 +36,8 @@ function Host() {
       <div style={{ display: 'grid', gap: '20px', justifyContent: 'center' }}>
         <button onClick={() => createRoom('stir-the-pot')}>STIR THE POT</button>
         <button onClick={() => createRoom('dirty-laundry')}>DIRTY LAUNDRY</button>
-        <button onClick={() => createRoom('museum')}>MUSEUM OF MISTAKES</button>
-        <button onClick={() => createRoom('my-point')}>HERE'S MY POINT</button>
+        <button onClick={() => createRoom('museum-of-modern-mistakes')}>MUSEUM OF MISTAKES</button>
+        <button onClick={() => createRoom('heres-my-point-new')}>HERE'S MY POINT</button>
       </div>
     </div>
   );
