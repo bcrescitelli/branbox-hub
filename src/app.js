@@ -3,12 +3,12 @@ import { auth, db } from './firebaseConfig';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { ref, onValue } from 'firebase/database';
 
-// 1. IMPORT YOUR GAMES
-// Note: We use the relative paths to the 'games' folder you uploaded
-import StirThePot from '../games/stir-the-pot/src/App';
-import DirtyLaundry from '../games/dirty-laundry/src/App';
-import Museum from '../games/museum-of-modern-mistakes/src/App';
-import MyPoint from '../games/heres-my-point-new/src/App';
+// 1. UPDATED IMPORTS (Pointing to the root folders)
+// We go up one level (..) out of the 'src' folder, then into each game's folder.
+import StirThePot from '../stir-the-pot/src/App.jsx';
+import DirtyLaundry from '../dirty-laundry/src/App.jsx';
+import Museum from '../museum-of-modern-mistakes/src/App.jsx';
+import MyPoint from '../heres-my-point-new/src/App.jsx';
 
 // 2. IMPORT THE HOST COMPONENT
 import Host from './Host';
@@ -19,10 +19,11 @@ function App() {
   const [gameType, setGameType] = useState(null);
   const [isJoining, setIsJoining] = useState(false);
 
-  // Determine if we are on the /host page or the main player page
+  // Checks if the user is visiting the /host URL
   const isHostView = window.location.pathname === '/host';
 
   // 3. ANONYMOUS AUTH HANDSHAKE
+  // This gives every player a unique ID so they don't lose progress if they refresh.
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       if (!u) {
@@ -34,7 +35,8 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  // 4. AUTO-DETECT LOGIC (The "Jackbox" Feel)
+  // 4. THE AUTO-DETECT LOGIC
+  // When a player enters a code, it looks up which game the host started.
   const handleJoinRoom = () => {
     if (!roomCode) return alert("Please enter a code");
     
@@ -45,7 +47,6 @@ function App() {
     onValue(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.val();
-        // This is the magic: it reads the gameType set by the Host
         setGameType(data.gameType);
         setRoomCode(code);
       } else {
@@ -55,14 +56,15 @@ function App() {
     });
   };
 
-  // 5. RENDERING LOGIC
+  // 5. RENDERING (The Router)
 
-  // ROUTE A: The Host Screen (The TV)
+  // PATH A: The Host Screen (The Big Screen/TV)
   if (isHostView) {
     return <Host />;
   }
 
-  // ROUTE B: The Active Game (The Phone after joining)
+  // PATH B: The Active Game (The Phone)
+  // Once the code is detected, it renders the specific game component.
   if (gameType) {
     switch (gameType) {
       case 'stir-the-pot':
@@ -74,18 +76,18 @@ function App() {
       case 'my-point':
         return <MyPoint code={roomCode} user={user} />;
       default:
-        return <div>Unknown game type detected.</div>;
+        return <div>Oops! Game type "{gameType}" not recognized.</div>;
     }
   }
 
-  // ROUTE C: The Join Screen (The Default Home Page)
+  // PATH C: The Main Join Screen (Default)
   return (
     <div style={styles.container}>
       <h1 style={styles.title}>BRANBOX CENTRAL</h1>
       <div style={styles.card}>
         <input
           type="text"
-          placeholder="ENTER 4-LETTER CODE"
+          placeholder="ENTER CODE"
           value={roomCode}
           onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
           maxLength={4}
@@ -99,19 +101,19 @@ function App() {
           {isJoining ? "JOINING..." : "JOIN GAME"}
         </button>
       </div>
-      <p style={styles.footer}>Hosting a party? Go to <b>/host</b> on the big screen.</p>
+      <p style={styles.footer}>Hosting? Go to <b>/host</b> on the big screen.</p>
     </div>
   );
 }
 
-// Simple styling to keep it clean
+// Minimalist styling for the lobby
 const styles = {
-  container: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', backgroundColor: '#1a1a1a', color: 'white', fontFamily: 'sans-serif' },
-  title: { fontSize: '3rem', marginBottom: '20px', color: '#ffcc00' },
-  card: { backgroundColor: '#333', padding: '40px', borderRadius: '15px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', gap: '20px' },
-  input: { padding: '15px', fontSize: '1.5rem', textAlign: 'center', borderRadius: '5px', border: 'none', textTransform: 'uppercase' },
-  button: { padding: '15px', fontSize: '1.2rem', backgroundColor: '#ffcc00', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' },
-  footer: { marginTop: '20px', fontSize: '0.9rem', opacity: 0.7 }
+  container: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', backgroundColor: '#121212', color: 'white', fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif' },
+  title: { fontSize: '3.5rem', marginBottom: '30px', fontWeight: '900', letterSpacing: '2px', color: '#00d4ff' },
+  card: { backgroundColor: '#1e1e1e', padding: '50px', borderRadius: '20px', boxShadow: '0 20px 50px rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', gap: '20px', border: '1px solid #333' },
+  input: { padding: '15px', fontSize: '1.8rem', textAlign: 'center', borderRadius: '10px', border: '2px solid #333', backgroundColor: '#000', color: '#fff', outline: 'none' },
+  button: { padding: '15px', fontSize: '1.4rem', backgroundColor: '#00d4ff', color: '#000', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold', transition: 'transform 0.2s' },
+  footer: { marginTop: '30px', fontSize: '1rem', opacity: 0.5 }
 };
 
 export default App;
