@@ -1,62 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
+// Import the shared database from your hub
+import { firestore as db } from '../../src/firebaseConfig'; 
 import { 
-  getFirestore, 
-  doc, 
-  setDoc, 
-  onSnapshot, 
-  updateDoc, 
-  arrayUnion, 
-  getDoc 
+  doc, setDoc, onSnapshot, updateDoc, arrayUnion, getDoc 
 } from 'firebase/firestore';
 import { 
-  getAuth, 
-  signInAnonymously, 
-  signInWithCustomToken,
-  onAuthStateChanged 
-} from 'firebase/auth';
-import { 
-  ChefHat, 
-  Users, 
-  Play, 
-  Timer, 
-  AlertCircle, 
-  CheckCircle2, 
-  Flame, 
-  Utensils,
-  Trophy,
-  RotateCcw,
-  Skull,
-  Volume2,
-  VolumeX,
-  Zap,
-  Star,
-  Hand,
-  Waves,
-  Compass,
-  HandMetal,
-  Dna,
-  RefreshCcw,
-  ArrowRight
+  ChefHat, Users, Play, Timer, AlertCircle, CheckCircle2, Flame, Utensils,
+  Trophy, RotateCcw, Skull, Volume2, VolumeX, Zap, Star, Hand, Waves,
+  Compass, HandMetal, Dna, RefreshCcw, ArrowRight
 } from 'lucide-react';
 
-// --- Firebase Configuration ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : {
-      apiKey: "AIzaSyD_YGPU1QiWCsbKk7i7uLTRdvwNjock5HQ",
-      authDomain: "stir-the-pot-game.firebaseapp.com",
-      projectId: "stir-the-pot-game",
-      storageBucket: "stir-the-pot-game.firebasestorage.app",
-      messagingSenderId: "490697693148",
-      appId: "1:490697693148:web:3515513c66df65f987e119"
-    };
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'stir-the-pot-game';
+const appId = 'stir-the-pot-game';
 
 // --- Constants ---
 const ROUND_TIME = 45;
@@ -75,19 +29,18 @@ const DISH_NAMES = [
 const generateRoomCode = () => Math.random().toString(36).substring(2, 6).toUpperCase();
 
 // --- Main App Component ---
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [view, setView] = useState('LANDING'); 
-  const [role, setRole] = useState(null); 
-  const [inputCode, setInputCode] = useState('');
-  const [activeRoomCode, setActiveRoomCode] = useState('');
+export default function App({ code, user, role: initialRole }) {
+  const [view, setView] = useState('LOBBY'); 
+  const [role, setRole] = useState(initialRole); 
+  const [activeRoomCode, setActiveRoomCode] = useState(code);
   const [roomData, setRoomData] = useState(null);
-  const [playerName, setPlayerName] = useState('');
   const [error, setError] = useState('');
   const [isMuted, setIsMuted] = useState(false);
+  const [playerName, setPlayerName] = useState(''); 
   
   const introAudio = useRef(null);
 
+  // KEEP THIS: Audio Setup
   useEffect(() => {
     introAudio.current = new Audio('intro.mp3');
     introAudio.current.loop = true;
@@ -100,23 +53,12 @@ export default function App() {
     };
   }, []);
 
+  // THE AUTH BLOCK WAS HERE - IT IS NOW GONE
+
+  // KEEP THIS: Database Sync Logic (This is your next block)
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Auth failed:", err);
-        setError("Connection failed.");
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
-  }, []);
+    if (!activeRoomCode || !user) return;
+    // ... the rest of your database syncing code
 
   useEffect(() => {
     if (!activeRoomCode || !user) return;
@@ -220,13 +162,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 font-sans selection:bg-orange-500 overflow-hidden">
-      {role === 'HOST' && view !== 'LANDING' && view !== 'RESULTS' && (
-        <div className="fixed bottom-6 right-6 z-50 flex gap-3">
-          <button onClick={() => { introAudio.current.play(); }} className="p-4 bg-orange-600 rounded-full border-4 border-orange-400 active:scale-90 shadow-2xl hover:bg-orange-500 transition-all"><Volume2 size={24} /></button>
-          <button onClick={() => { introAudio.current.muted = !isMuted; setIsMuted(!isMuted); }} className="p-4 bg-stone-800 rounded-full active:scale-90 border-4 border-stone-700 shadow-2xl">{isMuted ? <VolumeX size={24} /> : <Volume2 size={24} />}</button>
-        </div>
-      )}
-      {view === 'LANDING' && <LandingView setInputCode={setInputCode} inputCode={inputCode} setPlayerName={setPlayerName} createRoom={createRoom} joinRoom={joinRoom} error={error} />}
+      {/* LANDING VIEW REMOVED - GO STRAIGHT TO LOBBY */}
       {view === 'LOBBY' && <LobbyView roomCode={activeRoomCode} roomData={roomData} role={role} user={user} appId={appId} />}
       {view === 'INTERMISSION' && <IntermissionView roomCode={activeRoomCode} roomData={roomData} role={role} user={user} appId={appId} requestPermissions={requestPermissions} />}
       {view === 'PLAYING' && <GameView roomCode={activeRoomCode} roomData={roomData} user={user} role={role} appId={appId} />}
