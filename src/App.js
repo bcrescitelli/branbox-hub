@@ -3,7 +3,7 @@ import { auth, db } from './firebaseConfig';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { ref, onValue } from 'firebase/database';
 
-// Import sub-games using lowercase folder names
+// Matching your lowercase folder names from screenshot
 import StirThePot from '../stir-the-pot/src/App.jsx';
 import DirtyLaundry from '../dirty-laundry/src/App.jsx';
 import Museum from '../museum-of-modern-mistakes/src/App.jsx';
@@ -44,15 +44,24 @@ export default function App() {
       case 'dirty-laundry': return <DirtyLaundry {...props} />;
       case 'museum': return <Museum {...props} />;
       case 'my-point': return <MyPoint {...props} />;
-      default: return <div>Unknown game: {gameType}</div>;
+      default: return <div style={{color: 'white'}}>Unknown game: {gameType}</div>;
     }
   }
 
   return (
-    <div style={{ textAlign: 'center', marginTop: '100px', color: 'white' }}>
+    <div style={{ textAlign: 'center', marginTop: '100px', color: 'white', backgroundColor: 'black', height: '100vh' }}>
       <h1>BRANBOX HUB</h1>
-      <input onChange={(e) => setRoomCode(e.target.value)} placeholder="CODE" />
-      <button onClick={handleJoin}>JOIN</button>
+      <input 
+        style={{ padding: '10px', fontSize: '1.2rem' }} 
+        onChange={(e) => setRoomCode(e.target.value)} 
+        placeholder="ENTER CODE" 
+      />
+      <button 
+        style={{ padding: '10px 20px', fontSize: '1.2rem', marginLeft: '10px' }} 
+        onClick={handleJoin}
+      >
+        JOIN
+      </button>
     </div>
   );
 }
