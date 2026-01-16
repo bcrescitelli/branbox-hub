@@ -1,508 +1,562 @@
-import React, { useState, useEffect, useRef } from 'react';
-// Import the shared database from your hub
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { firestore as db } from '../../firebaseConfig'; 
 import { 
-  doc, 
-  setDoc, 
-  onSnapshot, 
-  updateDoc, 
-  arrayUnion,
-  getDoc,
-  serverTimestamp,
-  increment,
-  collection
+  doc, onSnapshot, updateDoc, arrayUnion
 } from 'firebase/firestore';
 import { 
-  Users, ShieldAlert, FileText, Lock, ArrowRight, 
-  Volume2, VolumeX, Play, Gavel, ThumbsUp, 
-  CheckCircle, XCircle, Camera, Skull, Ghost, AlertTriangle, RefreshCw
+  ChefHat, Play, CheckCircle2, Utensils,
+  Trophy, Skull, Zap, Waves,
+  Compass, HandMetal, RefreshCcw
 } from 'lucide-react';
 
-/* -----------------------------------------------------------------------
-  GAME CONFIGURATION
-  -----------------------------------------------------------------------
-*/
-const appId = "murder-at-the-cabin";
-
-const DEFAULT_WEAPONS = [
-  'Rusty Axe', 'Poisoned Gumbo', 'Bear Trap', 'Hunting Rifle', 
-  'Canoe Paddle', 'Fireplace Poker', 'Strangulation', 'Ice Pick',
-  'Chainsaw', 'Antler', 'Fishing Line', 'Heavy Skillet', 'Flare Gun'
+const appId = 'stir-the-pot-game';
+const ROUND_TIME = 45;
+const DISH_NAMES = [
+  "The Sunday Morning Mistake",
+  "The Boss's Retirement Party",
+  "A Wedding to Forget",
+  "Last Night's Regrets",
+  "The Health Inspector's Nightmare",
+  "Roommate's Mystery Tupperware",
+  "The First Date Disaster",
+  "Midnight Gas Station Run",
+  "Grandma's Secret 'Medicine'"
 ];
 
-/* -----------------------------------------------------------------------
-  UTILITIES & STYLES
-  -----------------------------------------------------------------------
-*/
-const resizeImage = (file, maxWidth = 300) => {
-    return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                const scale = maxWidth / img.width;
-                canvas.width = maxWidth;
-                canvas.height = img.height * scale;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                resolve(canvas.toDataURL('image/jpeg', 0.6)); 
-            };
-            img.src = event.target.result;
-        };
-        reader.readAsDataURL(file);
-    });
-};
-
-const GameStyles = () => (
-  <style>{`
-    @keyframes fog { 
-      0% { transform: translateX(-5%) translateY(0); opacity: 0.3; } 
-      50% { opacity: 0.6; }
-      100% { transform: translateX(5%) translateY(-2%); opacity: 0.3; } 
-    }
-    .fog-layer {
-      position: absolute; inset: -50%; width: 200%; height: 200%;
-      background: radial-gradient(circle at 50% 50%, transparent 20%, rgba(200,200,200,0.1) 60%, transparent 80%);
-      animation: fog 30s infinite alternate ease-in-out; 
-      pointer-events: none; z-index: 1;
-    }
-    .crt-scanline {
-      position: absolute; inset: 0; 
-      background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.2));
-      background-size: 100% 4px; 
-      pointer-events: none; z-index: 50;
-    }
-    .crt-vignette {
-      position: absolute; inset: 0;
-      background: radial-gradient(circle, rgba(0,0,0,0) 60%, rgba(0,0,0,0.8) 100%);
-      pointer-events: none; z-index: 49;
-    }
-    .animate-in { animation: fadeIn 0.5s ease-out forwards; }
-    @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-  `}</style>
-);
-
-const SpookyBackground = () => (
-  <div className="absolute inset-0 overflow-hidden pointer-events-none">
-    <div className="absolute inset-0 bg-slate-950 z-0"></div>
-    <div className="fog-layer"></div>
-    <div className="crt-vignette"></div>
-    <div className="crt-scanline"></div>
-  </div>
-);
-
-/* -----------------------------------------------------------------------
-  COMPONENTS
-  -----------------------------------------------------------------------
-*/
-const Timer = ({ duration, onComplete, label = "TIME REMAINING" }) => {
-  const [timeLeft, setTimeLeft] = useState(duration);
-  useEffect(() => setTimeLeft(duration), [duration]);
-  useEffect(() => {
-    if (timeLeft <= 0) { onComplete && onComplete(); return; }
-    const interval = setInterval(() => setTimeLeft((t) => t - 1), 1000);
-    return () => clearInterval(interval);
-  }, [timeLeft, onComplete]);
-
-  return (
-    <div className="flex flex-col items-center relative z-30">
-      <div className="text-xs text-red-500 font-mono tracking-widest bg-black px-2 mb-1 border border-red-900/50 rounded">{label}</div>
-      <div className={`text-4xl font-mono font-bold px-6 py-2 rounded-lg border-2 bg-black/80 backdrop-blur-md ${timeLeft < 10 ? 'text-red-500 border-red-500 animate-pulse' : 'text-slate-200 border-slate-700'}`}>
-        {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
-      </div>
-    </div>
-  );
-};
-
-const CameraCapture = ({ onSave }) => {
-  const fileInputRef = useRef(null);
-  const [preview, setPreview] = useState(null);
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const resizedBase64 = await resizeImage(file);
-      setPreview(resizedBase64);
-      onSave(resizedBase64);
-    }
-  };
-  return (
-    <div className="flex flex-col items-center gap-2 p-4 bg-slate-800 rounded-lg border border-slate-700 w-full shadow-lg">
-      <div className="text-xs uppercase text-slate-400 font-bold tracking-wider">MUGSHOT (REQUIRED)</div>
-      {preview ? (
-        <div className="relative animate-in"><img src={preview} className="w-32 h-32 object-cover rounded-lg bg-black border-2 border-white shadow-xl" /><button onClick={() => { setPreview(null); onSave(null); }} className="absolute -top-2 -right-2 bg-red-600 rounded-full p-1 hover:bg-red-700"><XCircle className="w-5 h-5 text-white" /></button></div>
-      ) : (
-        <button onClick={() => fileInputRef.current.click()} className="w-20 h-20 rounded-full bg-slate-600 flex items-center justify-center hover:bg-slate-500 transition-colors"><Camera className="w-8 h-8 text-white" /></button>
-      )}
-      <input type="file" accept="image/*" capture="user" ref={fileInputRef} className="hidden" onChange={handleFileChange} />
-    </div>
-  );
-};
-
-const DrawingCanvas = ({ onSave }) => {
-  const canvasRef = useRef(null);
-  const [hasDrawn, setHasDrawn] = useState(false);
-  useEffect(() => {
-    const ctx = canvasRef.current.getContext('2d');
-    ctx.fillStyle = '#1e293b'; ctx.fillRect(0, 0, 300, 300);
-    ctx.lineWidth = 4; ctx.strokeStyle = 'white'; ctx.lineCap = 'round';
-  }, []);
-  const draw = (e) => {
-    if (!e.touches && e.buttons !== 1) return;
-    e.preventDefault(); setHasDrawn(true);
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-    ctx.lineTo(x, y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x, y);
-  };
-  const startDraw = (e) => {
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  };
-  return (
-    <div className="flex flex-col gap-4 w-full items-center">
-      <canvas ref={canvasRef} width={300} height={300} className="bg-slate-800 rounded-lg touch-none border-4 border-slate-600 shadow-2xl cursor-crosshair" onMouseDown={startDraw} onMouseMove={draw} onTouchStart={startDraw} onTouchMove={draw} />
-      <button onClick={() => onSave(canvasRef.current.toDataURL('image/jpeg', 0.5))} disabled={!hasDrawn} className="w-full bg-white text-black py-4 rounded-lg font-bold disabled:opacity-50 hover:bg-slate-200 transition-colors uppercase tracking-widest">SUBMIT SKETCH</button>
-    </div>
-  );
-};
-
-/* -----------------------------------------------------------------------
-  MAIN APP COMPONENT
-  -----------------------------------------------------------------------
-*/
 export default function App({ code, user, role: initialRole }) {
-  const [gameId] = useState(code);
-  const [gameState, setGameState] = useState(null);
-  const [playerState, setPlayerState] = useState(null);
-  const [view] = useState(initialRole === 'HOST' ? 'host' : 'player'); 
-  const [error, setError] = useState('');
-  const [isMuted, setIsMuted] = useState(false);
+  const [view, setView] = useState('LOBBY'); 
+  const [roomData, setRoomData] = useState(null);
   
-  const audioRef = useRef(null); 
-  const sfxRef = useRef(null);
+  const introAudio = useRef(null);
 
   useEffect(() => {
-    if (!user || !gameId) return;
-    return onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), (snap) => {
-      if (snap.exists()) setGameState(snap.data());
-      else setError("Game data missing.");
+    introAudio.current = new Audio('intro.mp3');
+    introAudio.current.loop = true;
+    introAudio.current.volume = 0.8;
+    const audioInstance = introAudio.current;
+    return () => {
+      if (audioInstance) {
+        audioInstance.pause();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!code || !user) return;
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', code);
+    const unsubscribe = onSnapshot(roomRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setRoomData(data);
+        if (data.status === 'LOBBY') setView('LOBBY');
+        if (data.status === 'INTERMISSION') setView('INTERMISSION');
+        if (data.status === 'PLAYING') setView('PLAYING');
+        if (data.status === 'GAME_OVER') setView('RESULTS');
+        
+        if (introAudio.current) {
+          introAudio.current.volume = data.status === 'PLAYING' ? 0.15 : 0.7;
+        }
+      }
     });
-  }, [user, gameId]);
+    return () => unsubscribe();
+  }, [code, user]);
 
-  useEffect(() => {
-    if (!user || !gameId || view !== 'player') return;
-    return onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${user.uid}`), (snap) => {
-      if (snap.exists()) setPlayerState(snap.data());
-    });
-  }, [user, gameId, view]);
-
-  // Music Logic
-  useEffect(() => {
-    if (!audioRef.current || view !== 'host') return;
-    const isPlayingMedia = gameState?.status === 'briefing';
-    if (isPlayingMedia) {
-        audioRef.current.pause(); 
-    } else {
-        if (audioRef.current.paused) audioRef.current.play().catch(()=>{});
-        const isQuiet = !['lobby', 'debrief1', 'debrief2', 'reveal', 'round4_debate', 'rules'].includes(gameState?.status);
-        audioRef.current.volume = isMuted ? 0 : (isQuiet ? 0.1 : 0.3);
+  const requestPermissions = async () => {
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      try { await DeviceMotionEvent.requestPermission(); } catch(e) { console.error(e); }
     }
-  }, [gameState?.status, isMuted, view]);
+  };
 
-  if (!gameState && !error) return <div className="h-screen bg-slate-950 flex items-center justify-center text-slate-500 font-mono">SYNCING WITH HUB...</div>;
+  if (!roomData) return (
+    <div className="min-h-screen bg-stone-950 flex flex-col items-center justify-center text-orange-500 font-black uppercase tracking-widest">
+      <Utensils className="animate-spin mb-4" size={48} />
+      Preheating...
+    </div>
+  );
 
   return (
-    <div className="h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden relative selection:bg-red-900 selection:text-white">
-      <GameStyles />
-      {view === 'host' && <><audio ref={audioRef} src="/music.mp3" loop /><audio ref={sfxRef} src="/join.mp3" /></>}
-      {view !== 'player' && <SpookyBackground />}
-      
-      {view === 'host' && gameState && <HostView gameId={gameId} gameState={gameState} />}
-      {view === 'player' && gameState && <PlayerView gameId={gameId} gameState={gameState} playerState={playerState} user={user} />}
-      
-      {error && <div className="fixed top-4 left-1/2 -translate-x-1/2 bg-red-600 p-4 rounded z-[100]">{error}</div>}
+    <div className="min-h-screen bg-stone-950 text-stone-100 font-sans selection:bg-orange-500 overflow-hidden">
+      {view === 'LOBBY' && <LobbyView roomCode={code} roomData={roomData} role={initialRole} user={user} appId={appId} />}
+      {view === 'INTERMISSION' && <IntermissionView roomCode={code} roomData={roomData} role={initialRole} user={user} appId={appId} requestPermissions={requestPermissions} />}
+      {view === 'PLAYING' && <GameView roomCode={code} roomData={roomData} user={user} role={initialRole} appId={appId} />}
+      {view === 'RESULTS' && <ResultsView roomData={roomData} roomCode={code} role={initialRole} appId={appId} />}
     </div>
   );
 }
 
-// --- HOST VIEW ---
-const HostView = ({ gameId, gameState }) => {
-  const [mugshots, setMugshots] = useState({});
-  const advance = (s, d={}) => updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), { status: s, roundStartedAt: Date.now(), ...d });
+// --- View Components ---
 
-  useEffect(() => {
-      if(gameState.status === 'lobby' || ['round1_suspect', 'reveal', 'voting'].includes(gameState.status)) {
-          const i = setInterval(async () => {
-              const ms = {};
-              for(const p of gameState.players) {
-                  const d = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`));
-                  if(d.exists() && d.data().dossier?.mugshot) ms[p.uid] = d.data().dossier.mugshot;
-              }
-              setMugshots(prev => ({...prev, ...ms}));
-          }, 2000);
-          return () => clearInterval(i);
-      }
-  }, [gameState.status, gameState.players]);
+function LobbyView({ roomCode, roomData, role, user, appId }) {
+  const [items, setItems] = useState(['', '', '', '', '']);
+  const [localError, setLocalError] = useState('');
+  const players = roomData?.players ? Object.values(roomData.players) : [];
+  const isReady = roomData?.players?.[user.uid]?.ready;
+  const isHost = role === 'HOST';
 
-  useEffect(() => {
-    const check = async () => {
-      if(!gameState.players.length) return;
-      const snaps = await Promise.all(gameState.players.map(p => getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`))));
-      const data = snaps.map(s => s.data());
-
-      if (gameState.status === 'rules' && data.every(p => p?.hasReadRules)) advance('briefing');
-      if (gameState.status === 'brainstorm' && data.every(p => p?.hasSubmittedWeapons)) finishBrainstorm();
-      if (gameState.status === 'round1_suspect' && data.every(p => p?.r1Suspect)) advance('round1_weapon');
-      if (gameState.status === 'round1_weapon' && data.every(p => p?.r1Weapon)) calculateR1Stats();
-      if (gameState.status === 'round2' && data.every(p => p?.sketch)) advance('lineup');
-      if (gameState.status === 'lineup' && data.every(p => p?.sketchVote)) handleRound2Winner();
-      if (gameState.status === 'round4_exchange' && data.every(p => p?.finishedExchange)) advance('round4_debate');
-      
-      if (gameState.status === 'killing_round') {
-          const mData = data.find(p => p.isMurderer);
-          if (mData && mData.victimChoice) handleMurder();
-      }
-
-      if (gameState.status === 'weapon_clues_murderer' && data.find(p => p.isMurderer)?.weaponClue) advance('weapon_clues_ghost');
-      if (gameState.status === 'weapon_clues_ghost') {
-         const ghost = data.find(p => p.isGhost);
-         if (!gameState.ghostId || (ghost && ghost.weaponClue)) revealClues();
-      }
-      if (gameState.status === 'voting' && data.every(p => p?.finalVote)) checkWinner();
-    };
-    const i = setInterval(check, 2500);
-    return () => clearInterval(i);
-  }, [gameState.status, gameState.players, gameState.ghostId]);
-
-  const finishBrainstorm = async () => {
-    let weapons = [];
-    for(const p of gameState.players) {
-      const d = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`));
-      if(d.data().submittedWeapons) weapons.push(...d.data().submittedWeapons);
+  const submitPantry = async () => {
+    setLocalError('');
+    if (items.some(i => i.trim() === '')) {
+      setLocalError("Fill all 5 boxes!");
+      return;
     }
-    if(weapons.length < 5) weapons = [...weapons, ...DEFAULT_WEAPONS];
-    const pool = [...new Set(weapons)].sort(()=>0.5-Math.random()).slice(0, 15);
-    const kUid = gameState.players[Math.floor(Math.random() * gameState.players.length)].uid;
-    const weapon = pool[Math.floor(Math.random() * pool.length)];
-    
-    await Promise.all(gameState.players.map(p => updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`), { isMurderer: p.uid === kUid })));
-    advance('round1_suspect', { possibleWeapons: pool, murderWeapon: weapon, murdererId: kUid });
-  };
-
-  const calculateR1Stats = async () => {
-    let perfect=0, kOnly=0, wOnly=0, wrong=0;
-    for(const p of gameState.players) {
-      const d = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`));
-      const g = d.data();
-      if(g.r1Suspect === gameState.murdererId && g.r1Weapon === gameState.murderWeapon) perfect++;
-      else if(g.r1Suspect === gameState.murdererId) kOnly++;
-      else if(g.r1Weapon === gameState.murderWeapon) wOnly++;
-      else wrong++;
+    const cleanItems = items.map(i => i.trim().toUpperCase());
+    const existingPantry = roomData.pantry || [];
+    const duplicate = cleanItems.find(i => existingPantry.includes(i));
+    if (duplicate) {
+      setLocalError(`DUPLICATE FOUND: "${duplicate}"`);
+      return;
     }
-    advance('debrief1', { r1Stats: { perfect, kOnly, wOnly, wrong }});
+
+    try {
+      const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+      await updateDoc(roomRef, { pantry: arrayUnion(...cleanItems) });
+      const up = {}; up[`players.${user.uid}.ready`] = true;
+      await updateDoc(roomRef, up);
+    } catch (e) { console.error(e); }
   };
 
-  const setupSketchRound = async () => {
-    const murderer = gameState.players.find(p => p.uid === gameState.murdererId);
-    const innocents = gameState.players.filter(p => p.uid !== gameState.murdererId).sort(()=>0.5-Math.random());
-    const prompts = [];
-    if(murderer) {
-        const d = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${murderer.uid}`));
-        if(d.data().dossier?.descriptionText) prompts.push(d.data().dossier.descriptionText);
-    }
-    if(innocents.length > 0) {
-        const d = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${innocents[0].uid}`));
-        if(d.data().dossier?.descriptionText) prompts.push(d.data().dossier.descriptionText);
-    }
-    if(prompts.length < 1) prompts.push("A shadowy figure.");
-    if(prompts.length < 2) prompts.push("Wearing a mask.");
-    advance('round2', { sketchPrompts: prompts.sort(() => 0.5 - Math.random()) });
-  };
-
-  const handleRound2Winner = async () => {
-    const votes = {};
-    for(const p of gameState.players) {
-        const d = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`));
-        const v = d.data().sketchVote;
-        if(v) votes[v] = (votes[v] || 0) + 1;
-    }
-    let winnerId = gameState.players[0].uid;
-    let maxVotes = -1;
-    Object.entries(votes).forEach(([uid, count]) => { if(count > maxVotes) { maxVotes = count; winnerId = uid; }});
-    const winner = gameState.players.find(p => p.uid === winnerId);
-    const innocents = gameState.players.filter(p => p.uid !== gameState.murdererId && p.uid !== winnerId);
-    let clueText = innocents.length > 0 ? `${innocents[0].name} is INNOCENT.` : "Trust your instincts.";
-    if (winnerId) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${winnerId}`), { advantageClue: clueText });
-    advance('debrief2', { round2WinnerName: winner?.name || "No One" });
-  };
-
-  const setupRumors = async () => {
-    let rumors = [];
-    for(const p of gameState.players) {
-      const d = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`));
-      if(d.data().dossier?.rumor) rumors.push({ text: d.data().dossier.rumor, author: p.name });
-    }
-    if(rumors.length<2) rumors.push({text:"I saw blood.", author:"Anon"}, {text:"He is lying.", author:"Anon"});
-    await Promise.all(gameState.players.map(async p => {
-      const r1 = rumors[Math.floor(Math.random()*rumors.length)];
-      const r2 = rumors[Math.floor(Math.random()*rumors.length)];
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`), { hand: [r1, r2], inbox: [] });
-    }));
-    advance('round4_exchange');
-  };
-
-  const handleMurder = async () => {
-      const kDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${gameState.murdererId}`));
-      const victimId = kDoc.data().victimChoice;
-      if(victimId) {
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${victimId}`), { isGhost: true });
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), { ghostId: victimId });
-          advance('killing_reveal', { victimId });
-      } else advance('weapon_clues_murderer', { displayedWeapons: gameState.possibleWeapons });
-  };
-
-  const startWeaponRound = async () => {
-      const others = gameState.possibleWeapons.filter(w => w !== gameState.murderWeapon).sort(()=>0.5-Math.random()).slice(0,6);
-      advance('weapon_clues_murderer', { displayedWeapons: [...others, gameState.murderWeapon].sort(()=>0.5-Math.random()), weaponClues: [] });
-  };
-  
-  const revealClues = async () => {
-      const kDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${gameState.murdererId}`));
-      const gDoc = gameState.ghostId ? await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${gameState.ghostId}`)) : null;
-      const clues = [];
-      if(kDoc.exists() && kDoc.data().weaponClue) clues.push({type: 'KILLER', text: kDoc.data().weaponClue});
-      if(gDoc?.exists() && gDoc.data().weaponClue) clues.push({type: 'GHOST', text: gDoc.data().weaponClue});
-      advance('weapon_reveal', { weaponClues: clues });
-  };
-
-  const checkWinner = async () => {
-    const votes = {}; const wVotes = {};
-    for(const p of gameState.players) {
-      const d = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`));
-      const v = d.data().finalVote; 
-      if(v) { votes[v.suspect] = (votes[v.suspect] || 0) + 1; if(v.weapon) wVotes[v.weapon] = (wVotes[v.weapon] || 0) + 1; }
-    }
-    const topSuspect = Object.keys(votes).reduce((a, b) => votes[a] > votes[b] ? a : b, null);
-    const topWeapon = Object.keys(wVotes).reduce((a, b) => wVotes[a] > wVotes[b] ? a : b, null);
-    advance('reveal', { caught: topSuspect === gameState.murdererId && topWeapon === gameState.murderWeapon });
-  };
-
-  const restart = async () => {
-    await Promise.all(gameState.players.map(p => updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`), {
-      dossier: {}, score: 0, hand: [], inbox: [], hasSubmittedDossier: false, submittedWeapons: [], r1Suspect: null, 
-      r1Weapon: null, sketch: null, finalVote: null, sketchVote: null, victimChoice: null, weaponClue: null, 
-      isGhost: false, hasReadRules: false
-    })));
-    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), {
-      status: 'lobby', possibleWeapons: [], murderWeapon: '', roundStats: {}, sketches: [], weaponClues: [], ghostId: null
+  const startGame = async () => {
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+    const turnOrder = players.map(p => p.id).sort(() => Math.random() - 0.5);
+    const shuffledDeck = [...roomData.pantry].sort(() => Math.random() - 0.5);
+    await updateDoc(roomRef, { 
+      deck: shuffledDeck, 
+      status: 'INTERMISSION', 
+      activeChefId: turnOrder[0],
+      turnOrder: turnOrder,
+      currentRound: 1,
+      currentChefIndex: 0,
+      isChefReady: false,
+      intermissionTimer: 0
     });
   };
 
-  if(gameState.status === 'lobby') return <div className="h-full flex flex-col items-center justify-center relative z-20 text-center"><h1 className="text-8xl font-black text-red-600 mb-4 drop-shadow-lg">LOBBY</h1><div className="text-4xl text-white mb-8 font-mono">{gameId}</div><div className="grid grid-cols-4 gap-6 w-full max-w-6xl">{gameState.players.map(p => <div key={p.uid} className="bg-slate-800 p-6 rounded-xl text-3xl font-bold border-2 border-slate-600 text-center flex flex-col items-center gap-2">{mugshots[p.uid] && <img src={mugshots[p.uid]} className="w-24 h-24 rounded-full object-cover border-2 border-slate-500"/>}{p.name}</div>)}</div>{gameState.players.length > 0 && <button onClick={()=>advance('rules')} className="mt-12 bg-red-600 px-16 py-6 text-4xl font-black rounded-full shadow-lg">START NIGHT</button>}</div>;
-  if(gameState.status === 'rules') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-6xl font-bold mb-8">READ THE RULES</h2><p className="text-2xl text-slate-400">Waiting for all players to confirm...</p></div>;
-  if(gameState.status === 'briefing') return <div className="h-full w-full bg-black relative z-50"><video src="/briefing.mp4" autoPlay className="w-full h-full object-contain" onEnded={()=>advance('brainstorm')} /></div>;
-  if(gameState.status === 'brainstorm') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-6xl font-bold mb-8">THE ARMORY</h2><p className="text-2xl text-slate-400 mb-8">Detectives are identifying weapons...</p><Timer duration={60} onComplete={finishBrainstorm}/></div>;
-  if(gameState.status === 'round1_suspect') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-6xl font-bold mb-8 text-red-500">WHO IS THE KILLER?</h2><div className="grid grid-cols-4 gap-4 w-full max-w-5xl">{gameState.players.map(p => <div key={p.uid} className="flex flex-col items-center"><img src={mugshots[p.uid]} className="w-32 h-32 rounded-full object-cover border-4 border-slate-700 mb-2"/><div className="text-xl font-bold">{p.name}</div></div>)}</div></div>;
-  if(gameState.status === 'round1_weapon') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-6xl font-bold mb-8 text-blue-500">WHAT DID THEY USE?</h2><div className="flex flex-wrap justify-center gap-4 max-w-6xl">{gameState.possibleWeapons.map(w=><div key={w} className="bg-slate-800 px-6 py-3 rounded-full text-xl border border-slate-600">{w}</div>)}</div></div>;
-  if(gameState.status === 'debrief1') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-7xl font-black mb-8">RESULTS</h2><div className="flex gap-8 mb-12"><div className="text-center"><div className="text-8xl font-black text-green-500">{gameState.r1Stats.perfect}</div><div>PERFECT</div></div><div className="text-center"><div className="text-8xl font-black text-yellow-500">{gameState.r1Stats.kOnly + gameState.r1Stats.wOnly}</div><div>PARTIAL</div></div><div className="text-center"><div className="text-8xl font-black text-red-500">{gameState.r1Stats.wrong}</div><div>WRONG</div></div></div><Timer duration={240} onComplete={setupSketchRound}/><button onClick={setupSketchRound} className="mt-8 bg-slate-700 px-8 py-3 rounded font-bold">Skip Debrief</button></div>;
-  if(gameState.status === 'round2') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-6xl font-bold mb-8">WITNESS STATEMENTS</h2><div className="flex gap-8 mb-12">{gameState.sketchPrompts?.map((txt, i) => (<div key={i} className="bg-black/50 p-6 rounded-xl border-2 border-red-500 max-w-sm text-2xl font-serif text-white">"{txt}"</div>))}</div><Timer duration={90} onComplete={()=>advance('lineup')}/></div>;
-  if(gameState.status === 'lineup') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-6xl font-bold mb-12">SKETCH VOTING</h2><Timer duration={45} onComplete={handleRound2Winner}/></div>;
-  if(gameState.status === 'debrief2') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-7xl font-black mb-4">DEBRIEF</h2>{gameState.round2WinnerName && <div className="text-3xl text-green-400 mb-8">WINNER: {gameState.round2WinnerName}</div>}<Timer duration={240} onComplete={()=>advance('role_reveal')}/><button onClick={()=>advance('role_reveal')} className="mt-8 bg-slate-700 px-8 py-3 rounded font-bold">Skip</button></div>;
-  if(gameState.status === 'role_reveal') return <div className="h-full flex flex-col items-center justify-center relative z-20 bg-black"><h1 className="text-8xl font-black text-white mb-8 animate-pulse">CHECK YOUR PHONE</h1><Timer duration={15} onComplete={setupRumors}/></div>;
-  if(gameState.status === 'round4_exchange') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-6xl font-bold mb-4">RUMOR MILL</h2><button onClick={()=>advance('round4_debate')} className="mt-8 bg-slate-700 px-6 py-2 rounded">Force Debate</button></div>;
-  if(gameState.status === 'round4_debate') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-7xl font-black mb-8">DEBATE SESSION</h2><Timer duration={150} onComplete={()=>advance('killing_round')}/><button onClick={()=>advance('killing_round')} className="mt-12 bg-red-600 px-12 py-4 text-2xl rounded-full font-bold shadow-lg">NEXT</button></div>;
-  if(gameState.status === 'killing_round') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-6xl font-black mb-8 text-red-600 animate-pulse">SOMEONE IS DYING...</h2></div>;
-  if(gameState.status === 'killing_reveal') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h1 className="text-8xl font-black text-white mb-4">MURDER!</h1><div className="text-5xl text-red-500 font-bold mb-8">VICTIM: {gameState.players.find(p=>p.uid===gameState.ghostId)?.name}</div><Timer duration={10} onComplete={startWeaponRound}/></div>;
-  if(gameState.status === 'weapon_clues_murderer' || gameState.status === 'weapon_clues_ghost') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-5xl font-bold mb-8">WEAPON ANALYSIS</h2><div className="flex flex-wrap gap-4 justify-center max-w-6xl mb-8">{gameState.displayedWeapons?.map(w=><div key={w} className="bg-slate-800 px-6 py-3 rounded text-xl border border-slate-600">{w}</div>)}</div><p className="text-2xl text-slate-400 animate-pulse">The Killer and Ghost are providing clues...</p></div>;
-  if(gameState.status === 'weapon_reveal') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-5xl font-bold mb-8">CLUES REVEALED</h2><div className="flex gap-12 mb-12">{gameState.weaponClues?.map((c,i)=><div key={i} className="bg-white text-black p-8 rounded-xl text-4xl font-black transform rotate-2">{c.text}</div>)}</div><Timer duration={120} onComplete={()=>advance('voting')}/><button onClick={()=>advance('voting')} className="mt-8 bg-red-600 px-8 py-3 rounded font-bold">Vote</button></div>;
-  if(gameState.status === 'voting') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h2 className="text-7xl font-black mb-8 text-red-500">FINAL JUDGMENT</h2><div className="grid grid-cols-4 gap-4 w-full max-w-6xl mb-8">{gameState.players.map(p=><div key={p.uid} className="flex flex-col items-center"><img src={mugshots[p.uid]} className="w-24 h-24 rounded-full object-cover border-2 border-slate-600 mb-2"/><div className="font-bold">{p.name}</div></div>)}</div></div>;
-  if(gameState.status === 'reveal') return <div className="h-full flex flex-col items-center justify-center relative z-20"><h1 className={`text-9xl font-black mb-12 drop-shadow-2xl ${gameState.caught ? 'text-green-500' : 'text-red-600'}`}>{gameState.caught ? "JUSTICE SERVED" : "KILLER ESCAPED"}</h1>{gameState.players.filter(p=>p.uid===gameState.murdererId).map(k=>(<div key={k.uid} className="text-center bg-black/80 p-12 rounded-2xl border-4 border-red-600"><img src={mugshots[k.uid]} className="w-64 h-64 rounded-full object-cover border-4 border-white mb-6 mx-auto"/><div className="text-6xl font-black text-white mb-2">{k.name}</div><div className="text-4xl text-red-500 font-bold">Weapon: {gameState.murderWeapon}</div></div>))}<button onClick={restart} className="mt-16 bg-slate-800 px-10 py-4 rounded-full text-2xl font-bold hover:bg-slate-700 border border-slate-500">New Mystery</button></div>;
+  if (isHost) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen p-10 max-w-[1200px] mx-auto w-full">
+        <div className="w-full flex justify-between items-start mb-16">
+          <div className="bg-white text-black p-8 rounded-[2.5rem] shadow-2xl transform -rotate-3 border-b-8 border-stone-300">
+            <p className="text-[10px] font-black opacity-40 uppercase mb-1">Room Code</p>
+            <p className="text-8xl font-black leading-none tracking-tighter tabular-nums">{roomCode}</p>
+          </div>
+          <div className="text-right">
+            <h2 className="text-5xl font-black italic text-orange-500 uppercase tracking-tighter">Kitchen Lobby</h2>
+          </div>
+        </div>
+        <div className="grid grid-cols-4 gap-6 w-full">
+          {players.map(p => (
+            <div key={p.id} className={`bg-stone-900/50 border-2 p-8 rounded-[2.5rem] text-center space-y-3 transition-all duration-500 ${p.ready ? 'border-green-500 bg-green-950/10' : 'border-stone-800'}`}>
+              <ChefHat className={`mx-auto ${p.ready ? 'text-green-500' : 'text-stone-600'}`} size={40} />
+              <p className="text-xl font-black uppercase truncate tracking-tighter">{p.name}</p>
+              <p className={`text-[10px] font-black uppercase tracking-widest ${p.ready ? 'text-green-500' : 'text-stone-600'}`}>{p.ready ? 'Pantry Ready' : 'Entering 5 items...'}</p>
+            </div>
+          ))}
+        </div>
+        <button disabled={players.length < 2 || !players.every(p => p.ready)} onClick={startGame} className="mt-16 px-16 py-6 bg-orange-600 text-white font-black text-3xl rounded-[2.5rem] shadow-2xl disabled:opacity-30 disabled:grayscale uppercase active:scale-95 transition-all">Start Game</button>
+      </div>
+    );
+  }
 
-  return null;
-};
+  return (
+    <div className="min-h-screen p-6 flex flex-col bg-stone-950 overflow-y-auto pb-24">
+      <div className="text-center mb-6">
+        <h2 className="text-3xl font-black italic text-orange-500 uppercase tracking-tighter">Stock the Pantry</h2>
+        <p className="text-stone-500 font-bold uppercase text-[10px] tracking-widest mt-2 px-8">Submit 5 unique toxic ingredients.</p>
+      </div>
+      {!isReady ? (
+        <div className="space-y-3 animate-in slide-in-from-bottom-8 duration-700">
+          {items.map((v, i) => (
+            <div key={i} className="relative">
+               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-500/30 font-black italic">{i+1}</span>
+               <input maxLength={30} type="text" placeholder="Something toxic..." className="w-full bg-stone-900 pl-10 pr-4 py-4 rounded-xl font-black uppercase outline-none focus:border-orange-500 border-2 border-stone-800 transition-all text-lg" value={v} onChange={(e) => { const n = [...items]; n[i] = e.target.value; setItems(n); }} />
+            </div>
+          ))}
+          {localError && <div className="p-3 bg-red-600/20 border border-red-500 text-red-500 font-black text-xs uppercase text-center rounded-xl">{localError}</div>}
+          <button onClick={submitPantry} className="w-full bg-orange-600 font-black py-5 rounded-2xl text-xl uppercase shadow-2xl mt-4 active:scale-95 transition-all">Submit ingredients</button>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6">
+          <div className="bg-green-600 p-8 rounded-[3rem] shadow-2xl animate-bounce"><CheckCircle2 size={80} className="text-white" /></div>
+          <p className="text-3xl font-black uppercase italic tracking-tighter">Stocked!</p>
+          <p className="text-stone-600 font-black uppercase tracking-widest text-xs px-10 leading-relaxed">Wait for the Host to open the kitchen...</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
-// --- PLAYER VIEW ---
-const PlayerView = ({ gameId, gameState, playerState, user }) => {
-  const [form, setForm] = useState({});
-  const [wInput, setWInput] = useState("");
-  const [vote, setVote] = useState({});
-  const [showRole, setShowRole] = useState(false);
-  const [rumorEdit, setRumorEdit] = useState("");
-  const [rumorNote, setRumorNote] = useState("");
-  const [cardIdx, setCardIdx] = useState(0);
-  const [targetId, setTargetId] = useState("");
-  const [waiting, setWaiting] = useState(false);
-  const [mugshots, setMugshots] = useState({});
-  const [sketches, setSketches] = useState([]);
-  const [weaponClue, setWeaponClue] = useState("");
-  const [busyWork, setBusyWork] = useState("");
+function IntermissionView({ roomCode, roomData, role, user, appId, requestPermissions }) {
+  const isHost = role === 'HOST';
+  const isNextChef = roomData.activeChefId === user.uid;
+  const nextChefName = roomData.players[roomData.activeChefId]?.name || "Someone";
+  const lastChefStats = roomData.lastChefStats;
+  const countdownInterval = useRef(null);
 
-  useEffect(() => { setWaiting(false); }, [gameState.status]);
-  
+  const startCountdown = useCallback(async () => {
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+    let count = 5;
+    await updateDoc(roomRef, { intermissionTimer: count });
+    
+    clearInterval(countdownInterval.current);
+    countdownInterval.current = setInterval(async () => {
+      count -= 1;
+      if (count <= 0) {
+        clearInterval(countdownInterval.current);
+        await updateDoc(roomRef, { status: 'PLAYING', timer: 0, intermissionTimer: 0 });
+      } else {
+        await updateDoc(roomRef, { intermissionTimer: count });
+      }
+    }, 1000);
+  }, [appId, roomCode]);
+
   useEffect(() => {
-    const fetchData = async () => {
-        if(gameState.status === 'round1_suspect' || gameState.status === 'voting') {
-            gameState.players.forEach(async p => {
-                const d = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`));
-                if(d.exists() && d.data().dossier?.mugshot) setMugshots(prev => ({...prev, [p.uid]: d.data().dossier.mugshot}));
-            });
+    if (isHost && roomData.isChefReady && roomData.intermissionTimer === 0) {
+      startCountdown();
+    }
+  }, [roomData.isChefReady, roomData.intermissionTimer, isHost, startCountdown]);
+
+  const handleChefReady = async () => {
+    await requestPermissions();
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+    await updateDoc(roomRef, { isChefReady: true });
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center max-w-[1200px] mx-auto w-full">
+      <div className="w-full mb-8">
+        <p className="text-[10px] font-black text-stone-600 uppercase mb-4 tracking-[0.4em]">Current Leaderboard</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+           {Object.values(roomData.players).sort((a,b) => b.score - a.score).map((p, i) => (
+             <div key={p.id} className={`p-4 rounded-[1.5rem] border-2 transition-all ${i === 0 ? 'bg-orange-600/10 border-orange-500 shadow-xl' : 'bg-stone-900/50 border-stone-800'}`}>
+                <p className={`text-[10px] font-black italic mb-1 ${i === 0 ? 'text-orange-500' : 'text-stone-600'}`}>#{i+1}</p>
+                <p className="text-lg font-black uppercase truncate tracking-tighter">{p.name}</p>
+                <p className="text-2xl font-black text-white mt-1">{p.score}</p>
+             </div>
+           ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col items-center animate-in zoom-in duration-700">
+        {lastChefStats && (
+          <div className="mb-6 bg-white/5 p-5 rounded-[2rem] border border-white/10 backdrop-blur-md">
+             <p className="text-orange-500 font-black uppercase text-[10px] mb-1 tracking-widest">Shift Results</p>
+             <h3 className="text-2xl font-black italic uppercase text-white">{lastChefStats.name} prepped {lastChefStats.count} items!</h3>
+          </div>
+        )}
+        <div className="bg-orange-600 p-8 rounded-[2.5rem] shadow-xl rotate-3 mb-6 animate-bounce">
+          <ChefHat size={70} className="text-white" />
+        </div>
+        <p className="text-stone-500 font-black uppercase text-xl mb-2 tracking-[0.2em]">Next Head Chef:</p>
+        <h2 className="text-6xl md:text-8xl font-black uppercase italic text-white leading-none tracking-tighter break-words px-8">{nextChefName}</h2>
+        {roomData.isChefReady ? (
+          <div className="mt-10 w-24 h-24 rounded-full border-[6px] border-stone-800 flex items-center justify-center bg-stone-900 shadow-inner">
+             <span className="text-5xl font-black text-orange-500 tabular-nums animate-pulse">{roomData.intermissionTimer || 5}</span>
+          </div>
+        ) : (
+          <div className="mt-10">
+            {isNextChef ? (
+              <button onClick={handleChefReady} className="px-12 py-5 bg-white text-black font-black text-2xl rounded-full shadow-2xl flex items-center gap-4 hover:scale-105 active:scale-95 transition-all uppercase">
+                I'm Ready! <Play fill="currentColor" />
+              </button>
+            ) : (
+              <p className="text-stone-600 font-black uppercase italic tracking-widest text-sm animate-pulse">Wait for {nextChefName} to sharpen their knives...</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GameView({ roomCode, roomData, user, role, appId }) {
+  const [timeLeft, setTimeLeft] = useState(ROUND_TIME);
+  const [pantryShuffle, setPantryShuffle] = useState([]);
+  const [sabProgress, setSabProgress] = useState(0); 
+  const isChef = roomData.activeChefId === user.uid;
+  const isHost = role === 'HOST';
+  const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+  const timerInterval = useRef(null);
+  const motionRef = useRef({ lastX: 0, lastY: 0, lastZ: 0 });
+
+  const triggerSabotage = async (tid) => {
+    if (!tid) return;
+    const types = ['SCRUB', 'DIAL', 'WIPE'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    const updates = {};
+    updates[`sabotages.${tid}`] = { type, progress: 0, targetAngle: Math.floor(Math.random() * 360) };
+    updates[`players.${user.uid}.sabotageCharges`] = (roomData.players[user.uid]?.sabotageCharges || 0) - 1;
+    await updateDoc(roomRef, updates);
+  };
+
+  const finishSab = useCallback(async () => {
+    const updates = {}; updates[`sabotages.${user.uid}`] = null;
+    await updateDoc(roomRef, updates);
+    setSabProgress(0);
+  }, [roomRef, user.uid]);
+
+  const skipIngredient = async () => {
+    if (!isChef) return;
+    const deck = [...roomData.deck];
+    deck.shift(); 
+    if (deck.length === 0) deck.push(...[...roomData.pantry].sort(() => Math.random() - 0.5));
+    const up = { deck, currentIngredient: deck[0] };
+    up[`players.${user.uid}.score`] = Math.max(0, (roomData.players[user.uid]?.score || 0) - 100);
+    await updateDoc(roomRef, up);
+  };
+
+  useEffect(() => {
+    const sab = roomData.sabotages?.[user.uid];
+    if (!sab) return;
+    if (sab.type === 'SCRUB') {
+      const handleMotion = (e) => {
+        const { x, y } = e.accelerationIncludingGravity || { x:0, y:0, z:0 };
+        if (Math.abs(x - motionRef.current.lastX) + Math.abs(y - motionRef.current.lastY) > 15) {
+          setSabProgress(p => { if (p >= 100) { finishSab(); return 100; } return p + 2.5; });
         }
-        if(gameState.status === 'lineup') {
-             const s = [];
-             for(const p of gameState.players) {
-                 const d = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${p.uid}`));
-                 if(d.exists() && d.data().sketch) s.push({id:p.uid, url:d.data().sketch});
-             }
-             setSketches(s);
-        }
-    };
-    fetchData();
-  }, [gameState.status]);
+        motionRef.current = { lastX: x, lastY: y };
+      };
+      window.addEventListener('devicemotion', handleMotion);
+      return () => window.removeEventListener('devicemotion', handleMotion);
+    }
+  }, [roomData.sabotages, user.uid, finishSab]);
 
-  const send = async (d) => { setWaiting(true); await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${user.uid}`), d); };
+  const endShift = useCallback(async () => {
+    const nextIdx = roomData.currentChefIndex + 1;
+    const stats = { name: roomData.players[roomData.activeChefId]?.name, count: roomData.chefSuccessCount };
+    if (nextIdx >= roomData.turnOrder.length) {
+      if (roomData.currentRound < 3) await updateDoc(roomRef, { status: 'INTERMISSION', currentRound: roomData.currentRound + 1, currentChefIndex: 0, activeChefId: roomData.turnOrder[0], timer: 0, lastChefStats: stats, isChefReady: false });
+      else await updateDoc(roomRef, { status: 'GAME_OVER' });
+    } else await updateDoc(roomRef, { status: 'INTERMISSION', currentChefIndex: nextIdx, activeChefId: roomData.turnOrder[nextIdx], timer: 0, lastChefStats: stats, isChefReady: false });
+  }, [roomData, roomRef]);
 
-  if(!playerState) return <div className="h-full flex items-center justify-center text-slate-500 font-bold text-xl animate-pulse">PROFILE SYNC...</div>;
-  if(waiting) return <div className="h-full flex flex-col items-center justify-center text-slate-500"><CheckCircle className="w-16 h-16 text-green-500 mb-4"/><div>Waiting...</div></div>;
+  const startTurn = useCallback(async () => {
+    const currentDeck = roomData.deck || [];
+    const ingredient = currentDeck[0] || roomData.pantry[0];
+    await updateDoc(roomRef, {
+      timer: ROUND_TIME, 
+      dishName: DISH_NAMES[Math.floor(Math.random() * DISH_NAMES.length)],
+      currentIngredient: ingredient, 
+      chefSuccessCount: 0, 
+      completedIngredients: [],
+      isGoldenOrder: Math.random() > 0.8, 
+      sabotages: {} 
+    });
+    let lt = ROUND_TIME;
+    clearInterval(timerInterval.current);
+    timerInterval.current = setInterval(async () => {
+      lt -= 1;
+      if (lt <= 0) { clearInterval(timerInterval.current); endShift(); }
+      else await updateDoc(roomRef, { timer: lt });
+    }, 1000);
+  }, [roomData, roomRef, endShift]);
 
-  if(gameState.status === 'rules') return <div className="p-6 h-full flex flex-col justify-center text-center"><h2 className="text-3xl font-black text-red-500 mb-6">THE CABIN RULES</h2><p className="text-lg text-slate-300 mb-8">One Killer. One Ghost. Trust No One.</p><button onClick={()=>updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${user.uid}`), { hasReadRules: true })} className="w-full bg-red-600 py-5 rounded-xl font-black text-xl shadow-lg">READY</button></div>;
+  useEffect(() => {
+    if (isHost && roomData.activeChefId && roomData.timer === 0) startTurn();
+    return () => clearInterval(timerInterval.current);
+  }, [roomData.activeChefId, roomData.timer, isHost, startTurn]);
 
-  if(gameState.status === 'lobby') return <div className="p-6 h-full overflow-y-auto pb-32 relative z-30">{playerState.hasSubmittedDossier ? <div className="h-full flex items-center justify-center text-center"><CheckCircle className="w-20 h-20 text-green-500 mb-6" /><div className="text-2xl font-bold">Dossier Secured.</div></div> : <div className="space-y-8"><h2 className="text-2xl font-black text-white">INTAKE</h2><textarea className="w-full bg-slate-900 border border-slate-700 rounded p-4 text-white" placeholder="Start a Rumor..." onChange={e=>setForm({...form, rumor: e.target.value})} /><textarea className="w-full bg-slate-900 border border-slate-700 rounded p-4 text-white" placeholder="Killer Description..." onChange={e=>setForm({...form, descriptionText: e.target.value})} /><CameraCapture onSave={d=>setForm({...form, mugshot: d})} /><button disabled={!form.mugshot} onClick={()=>send({ dossier: form, hasSubmittedDossier: true })} className="w-full bg-red-600 py-5 rounded-xl font-black">SUBMIT</button></div>}</div>;
+  useEffect(() => {
+    if (!isHost && roomData.status === 'PLAYING') {
+      setPantryShuffle([...roomData.pantry].sort(() => Math.random() - 0.5));
+    }
+  }, [roomData.currentIngredient, roomData.status, roomData.pantry, isHost]);
 
-  if(gameState.status === 'brainstorm') return <div className="p-6 h-full flex flex-col"><h2 className="text-2xl font-bold mb-4">ADD WEAPONS</h2><div className="flex gap-2 mb-4"><input className="flex-1 bg-slate-800 rounded p-4 text-white" value={wInput} onChange={e=>setWInput(e.target.value)} placeholder="e.g. Flare Gun" /><button onClick={async ()=>{if(!wInput) return; await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${user.uid}`), { submittedWeapons: arrayUnion(wInput) }); setWInput("");}} className="bg-blue-600 px-6 rounded font-bold">ADD</button></div><button onClick={()=>send({hasSubmittedWeapons:true})} className="mt-auto w-full bg-white text-black py-4 rounded font-black">FINISHED</button></div>;
+  useEffect(() => { if (roomData.timer > 0) setTimeLeft(roomData.timer); }, [roomData.timer]);
 
-  if(gameState.status === 'round1_suspect') return <div className="p-4 grid grid-cols-2 gap-4 h-full">{gameState.players.map(p => <button key={p.uid} onClick={()=>send({ r1Suspect: p.uid })} className="bg-slate-800 p-4 rounded-xl font-bold flex flex-col items-center">{mugshots[p.uid] && <img src={mugshots[p.uid]} className="w-16 h-16 rounded-full mb-2 object-cover"/>}{p.name}</button>)}</div>;
-  if(gameState.status === 'round1_weapon') return <div className="p-4 grid grid-cols-2 gap-4 h-full">{gameState.possibleWeapons.map(w => <button key={w} onClick={()=>send({ r1Weapon: w })} className="bg-slate-800 p-4 rounded-xl text-sm font-bold">{w}</button>)}</div>;
-  if(gameState.status === 'round2') return <div className="p-4 flex flex-col items-center h-full"><h2 className="font-bold mb-4 text-xl uppercase">Sketch the Killer</h2><div className="bg-slate-800 p-4 rounded mb-4 text-sm w-full">{gameState.sketchPrompts?.map((t,i) => <div key={i} className="mb-1 text-white border-l-2 border-red-500 pl-2">"{t}"</div>)}</div><DrawingCanvas onSave={d=>send({ sketch: d })} /></div>;
+  const handleGuess = async (guess) => {
+    if (roomData.players[user.uid]?.isLockedOut || roomData.sabotages?.[user.uid]) return;
+    if (guess === roomData.currentIngredient) {
+      const deck = [...roomData.deck];
+      deck.shift(); 
+      if (deck.length === 0) deck.push(...[...roomData.pantry].sort(() => Math.random() - 0.5));
+      const mult = roomData.isGoldenOrder ? 2 : 1;
+      const up = { 
+        deck, currentIngredient: deck[0], chefSuccessCount: roomData.chefSuccessCount + 1, 
+        completedIngredients: arrayUnion(roomData.currentIngredient), isGoldenOrder: Math.random() > 0.8 
+      };
+      up[`players.${user.uid}.score`] = (roomData.players[user.uid]?.score || 0) + (500 * mult);
+      up[`players.${roomData.activeChefId}.score`] = (roomData.players[roomData.activeChefId]?.score || 0) + (300 * mult);
+      Object.keys(roomData.players).forEach(id => { up[`players.${id}.isLockedOut`] = false; });
+      await updateDoc(roomRef, up);
+    } else {
+      const up = {}; up[`players.${user.uid}.isLockedOut`] = true;
+      up[`players.${user.uid}.score`] = Math.max(0, (roomData.players[user.uid]?.score || 0) - (roomData.isGoldenOrder ? 600 : 200));
+      await updateDoc(roomRef, up);
+    }
+  };
 
-  if(gameState.status === 'lineup') return <div className="p-4 h-full"><h2 className="text-white font-bold mb-4 text-center">VOTE FOR SKETCH</h2><div className="grid grid-cols-2 gap-4">{sketches.map(s => <button key={s.id} onClick={() => s.id !== user.uid && send({ sketchVote: s.id })} disabled={s.id === user.uid} className="bg-white p-1 rounded aspect-square"><img src={s.url} className="w-full h-full object-cover" /></button>)}</div></div>;
-  if(gameState.status === 'role_reveal') return <div className="h-full flex flex-col items-center justify-center p-6 bg-slate-900">{!showRole ? <button onClick={()=>setShowRole(true)} className="w-64 h-64 rounded-full bg-slate-800 flex items-center justify-center text-xl font-bold shadow-2xl border-4 border-slate-700">REVEAL ROLE</button> : <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center p-8"><h1 className={`text-5xl font-black mb-4 ${playerState.isMurderer?'text-red-600':'text-blue-500'}`}>{playerState.isMurderer?"MURDERER":"INNOCENT"}</h1><button onClick={()=>setShowRole(false)} className="mt-12 text-slate-500 underline">Hide</button></div>}</div>;
-
-  if(gameState.status === 'round4_exchange') {
-      const currentCard = playerState.hand && playerState.hand[cardIdx];
-      if(!currentCard) return <div className="h-full flex items-center justify-center text-slate-500">Wait...</div>;
-      return <div className="p-6 h-full flex flex-col"><h2 className="text-center font-bold mb-4 uppercase">Rumor Mill</h2><div className="bg-white text-black p-4 rounded mb-6 text-lg font-serif">"{currentCard.text}"</div>{playerState.isMurderer ? <textarea className="w-full h-24 bg-slate-800 text-white p-3 rounded mb-4" value={rumorEdit} onChange={e=>setRumorEdit(e.target.value)} placeholder="Rewrite this rumor..." /> : <textarea className="w-full h-24 bg-slate-800 text-white p-3 rounded mb-4" value={rumorNote} onChange={e=>setRumorNote(e.target.value)} placeholder="Type original rumor exactly..." />}<select className="w-full bg-slate-800 p-4 rounded mb-4 text-white" onChange={e=>setTargetId(e.target.value)} value={targetId}><option value="">Send To...</option>{gameState.players.filter(p=>p.uid!==user.uid).map(p=><option key={p.uid} value={p.uid}>{p.name}</option>)}</select><button disabled={!targetId} onClick={async ()=>{ const txt = playerState.isMurderer ? rumorEdit : rumorNote; await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${targetId}`), { inbox: arrayUnion({ text: txt, fromName: playerState.name }) }); setRumorEdit(""); setRumorNote(""); setTargetId(""); if(cardIdx===0) setCardIdx(1); else send({finishedExchange:true}); }} className="w-full bg-blue-600 py-4 rounded font-bold">SEND</button></div>;
+  if (isHost) {
+    const isHeatOn = timeLeft < 15;
+    return (
+      <div className={`flex flex-col h-screen p-8 gap-8 transition-colors duration-1000 max-w-[1200px] mx-auto w-full ${isHeatOn ? 'bg-orange-950/20' : ''}`}>
+        <div className="flex justify-between items-center bg-stone-900 border-4 border-stone-800 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden">
+           {isHeatOn && <div className="absolute inset-0 bg-red-600/20 animate-pulse pointer-events-none"></div>}
+           <div className="flex items-center gap-6 relative">
+              <div className={`p-6 rounded-[1.5rem] shadow-xl ${roomData.isGoldenOrder ? 'bg-yellow-500 animate-pulse' : 'bg-orange-600'}`}><ChefHat className="text-white" size={48} /></div>
+              <div><p className="text-orange-500 font-black uppercase text-xs tracking-[0.3em]">Shift {roomData.currentRound}</p><h2 className="text-5xl font-black uppercase italic tracking-tighter leading-none">{roomData.players[roomData.activeChefId]?.name}</h2></div>
+           </div>
+           <div className={`p-6 rounded-[2rem] border-4 transition-all duration-300 ${timeLeft < 10 ? 'border-red-600 text-red-500 animate-pulse scale-105' : 'border-stone-800 bg-stone-950 text-white'}`}><span className="text-8xl font-black font-mono tabular-nums leading-none">{timeLeft}</span></div>
+        </div>
+        <div className="flex-1 grid grid-cols-12 gap-8">
+          <div className="col-span-8 bg-stone-900/40 rounded-[4rem] border-4 border-stone-900 p-12 flex flex-col items-center justify-center relative shadow-inner overflow-hidden">
+             {roomData.isGoldenOrder && <div className="absolute top-8 right-8 bg-yellow-500 text-black px-6 py-2 rounded-full font-black uppercase italic animate-bounce shadow-xl flex items-center gap-2 text-lg"><Zap size={20} fill="currentColor" /> Golden Order (2X)</div>}
+             <p className="text-stone-600 font-black uppercase tracking-[0.4em] mb-6 text-sm">Now Cooking:</p>
+             <h3 className="text-6xl font-black italic text-center mb-16 uppercase leading-none tracking-tighter drop-shadow-2xl">"{roomData.dishName}"</h3>
+             <div className="w-full max-w-2xl bg-stone-950 h-32 rounded-full border-4 border-stone-800 flex items-center px-6 gap-3 shadow-2xl relative">
+                {roomData.completedIngredients.map((_, i) => <div key={i} className="flex-1 bg-orange-600 h-20 rounded-full flex items-center justify-center animate-in zoom-in border-b-4 border-orange-800"><CheckCircle2 className="text-white" size={32} /></div>)}
+                {Array.from({ length: Math.max(0, 5 - roomData.completedIngredients.length) }).map((_, i) => <div key={i} className="flex-1 h-20 rounded-full border-2 border-stone-800 border-dashed opacity-20"></div>)}
+             </div>
+          </div>
+          <div className="col-span-4 flex flex-col gap-8">
+            <div className="bg-stone-900 p-8 rounded-[3rem] border-2 border-stone-800 shadow-xl overflow-hidden relative">
+              <h4 className="font-black uppercase text-red-500 mb-6 flex items-center gap-4 tracking-tighter text-2xl"><Skull size={32} /> Sabotage</h4>
+              <div className="space-y-4">
+                {Object.entries(roomData.sabotages || {}).map(([sid, sab]) => sab && (
+                  <div key={sid} className="flex items-center gap-4 animate-bounce"><Waves className="text-blue-500" size={32} /><p className="font-black text-2xl uppercase italic text-blue-400 truncate">{roomData.players[sid]?.name} IS REELING!</p></div>
+                ))}
+              </div>
+            </div>
+            <div className="flex-1 bg-stone-900 p-8 rounded-[3rem] border-2 border-stone-800 shadow-xl overflow-y-auto">
+              <h4 className="font-black uppercase text-stone-600 mb-6 text-sm tracking-widest">Standings</h4>
+              <div className="space-y-3">
+                {Object.values(roomData.players).sort((a,b) => b.score - a.score).map((p, i) => (
+                  <div key={p.id} className={`flex justify-between items-center p-4 rounded-[1.5rem] transition-all border-2 ${i === 0 ? 'bg-orange-600 border-orange-400 shadow-xl' : 'bg-stone-950 border-stone-900'}`}><div className="flex items-center gap-4"><span className={`text-xl font-black italic ${i === 0 ? 'text-white' : 'text-stone-700'}`}>{i+1}</span><span className={`text-xl font-black uppercase truncate max-w-[120px] ${i === 0 ? 'text-white' : ''}`}>{p.name}</span></div><span className={`text-2xl font-black ${i === 0 ? 'text-white' : 'text-orange-500'}`}>{p.score}</span></div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
-  if(gameState.status === 'round4_debate') return <div className="p-6 h-full overflow-y-auto"><h2 className="text-2xl font-bold mb-4 border-b border-slate-700 pb-2">INBOX</h2><div className="space-y-4">{playerState.inbox?.map((msg, i) => (<div key={i} className="bg-slate-800 p-4 rounded border-l-4 border-blue-500"><div className="text-xs text-slate-400 mb-1">From: {msg.fromName}</div><p className="text-white font-serif">"{msg.text}"</p></div>))}</div></div>;
-  if(gameState.status === 'killing_round') return <div className="p-6 h-full flex flex-col justify-center">{playerState.isMurderer ? <div className="grid grid-cols-2 gap-4"><h2 className="col-span-2 text-center text-red-600 font-black mb-4">KILL SOMEONE</h2>{gameState.players.filter(p=>p.uid!==user.uid).map(p=>(<button key={p.uid} onClick={()=>send({ victimChoice: p.uid })} className="bg-red-900 p-6 rounded font-bold">{p.name}</button>))}</div> : <p className="text-center animate-pulse">Kiler is choosing...</p>}</div>;
-  if(gameState.status === 'killing_reveal') return <div className="h-full flex flex-col items-center justify-center p-6 text-center">{playerState.isGhost ? <><Ghost className="w-24 h-24 text-blue-300 mb-4"/><h1 className="text-4xl font-bold">YOU ARE DEAD</h1></> : <h1 className="text-3xl font-bold">YOU SURVIVED</h1>}</div>;
-
-  if(gameState.status === 'weapon_clues_murderer' || gameState.status === 'weapon_clues_ghost') {
-      const isMyTurn = (gameState.status === 'weapon_clues_murderer' && playerState.isMurderer) || (gameState.status === 'weapon_clues_ghost' && playerState.isGhost);
-      if(isMyTurn) return <div className="p-6 h-full flex flex-col justify-center text-center"><div className="text-red-500 font-bold mb-2">WEAPON: {gameState.murderWeapon}</div><input className="w-full bg-slate-800 p-4 rounded mb-4 text-white" placeholder="One word clue..." onChange={e=>setWeaponClue(e.target.value)}/><button onClick={async ()=>{setWaiting(true); await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', `${gameId}_${user.uid}`), { weaponClue }); await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), { weaponClues: arrayUnion({type: playerState.isMurderer ? 'KILLER' : 'GHOST', text: weaponClue}) });}} className="w-full bg-red-600 py-4 rounded font-bold">SEND</button></div>;
-      return <div className="p-6 h-full flex flex-col justify-center"><h2 className="text-xl font-bold mb-4 uppercase">Journal</h2><textarea className="w-full h-32 bg-slate-800 text-white p-3 rounded" value={busyWork} onChange={e=>setBusyWork(e.target.value)} /><button onClick={()=>setBusyWork("")} className="w-full bg-slate-700 py-3 rounded mt-4 font-bold">SAVE</button></div>;
+  if (isChef) {
+    const roundConstraints = [
+      { title: "THE TRAINING SHIFT", text: "SAY ANYTHING!", text2: "Avoid words on the card", icon: <RefreshCcw /> },
+      { title: "THE LUNCH RUSH", text: "ONE WORD ONLY!", text2: "One single word per item", icon: <Zap /> },
+      { title: "KITCHEN NIGHTMARE", text: "SILENT CHARADES!", text2: "No talking. No noise.", icon: <Skull /> }
+    ];
+    const constraint = roundConstraints[roomData.currentRound - 1];
+    return (
+      <div className="min-h-screen p-8 flex flex-col items-center justify-center bg-stone-950 text-center">
+          <div className="mb-10">
+            <div className="bg-orange-600 w-24 h-24 mx-auto rounded-[2rem] flex items-center justify-center mb-6 shadow-2xl animate-bounce"><ChefHat size={48} className="text-white" /></div>
+            <p className="text-orange-500 font-black uppercase text-xs tracking-[0.3em]">{constraint.title}</p>
+            <h2 className="text-4xl font-black uppercase italic mt-2">{constraint.text}</h2>
+            <p className="text-stone-500 font-bold uppercase text-[10px] mt-2">{constraint.text2}</p>
+          </div>
+          <div className="bg-white text-black p-12 rounded-[4rem] w-full max-w-md shadow-2xl border-b-[16px] border-stone-300 relative overflow-hidden">
+             {roomData.isGoldenOrder && <div className="absolute top-0 left-0 w-full h-4 bg-yellow-500"></div>}
+             <p className="text-xs font-black uppercase tracking-widest text-stone-400 mb-2">The Ingredient:</p>
+             <h2 className="text-6xl font-black uppercase italic leading-none tracking-tighter break-words">{roomData.currentIngredient}</h2>
+          </div>
+          <div className="mt-12 grid grid-cols-2 gap-6 w-full max-w-md">
+             <div className="bg-stone-900 p-8 rounded-[3rem] border-4 border-stone-800"><p className="text-xs font-black text-stone-600 uppercase mb-1">Prepped</p><p className="text-6xl font-black text-orange-500">{roomData.chefSuccessCount}</p></div>
+             <div className="bg-stone-900 p-8 rounded-[3rem] border-4 border-stone-800"><p className="text-xs font-black text-stone-600 uppercase mb-1">Time</p><p className={`text-6xl font-black ${timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{timeLeft}</p></div>
+          </div>
+          {roomData.currentRound > 1 && <button onClick={skipIngredient} className="mt-10 bg-red-600/10 text-red-500 px-10 py-5 rounded-full font-black uppercase tracking-[0.4em] text-xs hover:bg-red-600 hover:text-white transition-all">Skip Order (-100)</button>}
+      </div>
+    );
   }
 
-  if(gameState.status === 'voting') return <div className="p-4 h-full"><h2 className="font-bold mb-4 text-red-500 uppercase">Final Vote</h2><div className="grid grid-cols-2 gap-2 mb-6">{gameState.players.map(p=><button key={p.uid} onClick={()=>setVote({...vote, suspect: p.uid})} className={`p-4 rounded border ${vote.suspect===p.uid?'bg-red-600':'bg-slate-800'} flex flex-col items-center`}>{mugshots[p.uid] && <img src={mugshots[p.uid]} className="w-12 h-12 rounded-full mb-1 object-cover"/>}{p.name}</button>)}</div>{!playerState.isGhost && <div className="grid grid-cols-2 gap-2 mb-6">{gameState.possibleWeapons.map(w=><button key={w} onClick={()=>setVote({...vote, weapon: w})} className={`p-2 rounded border text-xs ${vote.weapon===w?'bg-blue-600':'bg-slate-800'}`}>{w}</button>)}</div>}<button disabled={!vote.suspect} onClick={()=>send({ finalVote: vote })} className="w-full bg-white text-black py-5 rounded font-black">CAST VOTE</button></div>;
+  const activeSab = roomData.sabotages?.[user.uid];
+  const isLockedOut = roomData.players?.[user.uid]?.isLockedOut;
 
-  return <div className="h-full flex items-center justify-center text-slate-500 animate-pulse uppercase">Watch TV...</div>;
-};
+  if (isLockedOut) return (
+    <div className="min-h-screen bg-red-600 flex flex-col items-center justify-center p-12 text-center animate-in zoom-in duration-300 z-[200] relative">
+      <div className="bg-white p-12 rounded-[3rem] mb-12 transform -rotate-12 shadow-2xl border-b-[16px] border-stone-200">
+        <Skull size={180} className="text-red-600" />
+      </div>
+      <h2 className="text-[6rem] md:text-[8rem] font-black uppercase italic text-white mb-6 leading-none tracking-tighter drop-shadow-2xl">86'ED!</h2>
+      <div className="bg-black/30 p-10 rounded-[2.5rem] border-4 border-white/30 backdrop-blur-xl">
+        <p className="text-white font-black uppercase text-2xl tracking-[0.3em] leading-relaxed">OUT OF THE KITCHEN!</p>
+        <p className="text-red-200 font-bold uppercase text-xs mt-4 opacity-70">Wait for the next card to reappear...</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={`h-screen flex flex-col ${activeSab ? 'bg-blue-900' : 'bg-stone-950'}`}>
+      {activeSab ? (
+        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-10 relative overflow-hidden" 
+             onTouchMove={() => { if (activeSab.type === 'WIPE') setSabProgress(p => { if (p >= 100) { finishSab(); return 100; } return p + 3.5; }); }}>
+           {activeSab.type === 'SCRUB' && <><Waves size={150} className="text-blue-400 animate-pulse mb-4" /><h2 className="text-7xl font-black uppercase italic text-white">SCRUB!</h2><p className="text-xl font-bold text-blue-200 uppercase tracking-widest">SHAKE VIGOROUSLY!</p></>}
+           {activeSab.type === 'DIAL' && <><Compass size={150} className="text-blue-400 animate-spin-slow mb-4" /><h2 className="text-7xl font-black uppercase italic text-white">SET OVEN!</h2><p className="text-xl font-bold text-blue-200 uppercase tracking-widest">ROTATE PHONE!</p></>}
+           {activeSab.type === 'WIPE' && <><HandMetal size={150} className="text-blue-400 animate-bounce mb-4" /><h2 className="text-7xl font-black uppercase italic text-white">WIPE!</h2><p className="text-xl font-bold text-blue-200 uppercase tracking-widest">SWIPE SCREEN!</p></>}
+           <div className="w-full max-w-md bg-blue-950 h-10 rounded-full border-4 border-white/20 overflow-hidden shadow-2xl relative"><div className="bg-white h-full transition-all duration-100" style={{ width: `${sabProgress}%` }}></div></div>
+        </div>
+      ) : (
+        <>
+          <div className="p-6 bg-stone-900 border-b-4 border-stone-800 flex justify-between items-center shadow-2xl">
+             <div><p className="text-[10px] font-black uppercase text-stone-500 tracking-widest">Wallet</p><p className="text-4xl font-black text-orange-500 tabular-nums">{roomData.players?.[user.uid]?.score || 0}</p></div>
+             <div className="text-right">
+                <p className="text-[10px] font-black uppercase text-stone-500 tracking-widest">Sabotages</p>
+                <div className="flex gap-1 justify-end">{Array.from({ length: 3 }).map((_, i) => <Zap key={i} size={24} className={i < (roomData.players?.[user.uid]?.sabotageCharges || 0) ? 'text-blue-500 fill-blue-500' : 'text-stone-700'} />)}</div>
+             </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-stone-950">
+             <div className="p-6 bg-blue-950/40 rounded-[2.5rem] border-2 border-blue-900/50 shadow-inner">
+                <div className="flex items-center gap-3 mb-4"><Skull className="text-blue-400" size={24} /><p className="text-xs font-black uppercase text-blue-400 tracking-[0.4em]">Sabotage a Rival:</p></div>
+                <div className="relative">
+                  <select className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black uppercase text-xl outline-none border-b-[10px] border-blue-800 transition-all appearance-none" onChange={(e) => { triggerSabotage(e.target.value); e.target.value = ''; }} disabled={(roomData.players?.[user.uid]?.sabotageCharges || 0) <= 0}>
+                     <option value="">-- PICK VICTIM --</option>
+                     {Object.values(roomData.players).filter(p => p.id !== user.uid && p.id !== roomData.activeChefId).map(p => <option key={p.id} value={p.id} disabled={roomData.sabotages?.[p.id]}>{p.name}</option>)}
+                  </select>
+                  <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none"><HandMetal size={32}/></div>
+                </div>
+             </div>
+             <div className="space-y-3 pb-32">
+                <p className="text-[10px] font-black uppercase text-stone-700 tracking-[0.6em] text-center my-6">Select Ingredient</p>
+               {pantryShuffle.map((ing, idx) => <button key={idx} onClick={() => handleGuess(ing)} className="w-full bg-stone-900 border-b-[8px] border-stone-800 p-6 rounded-[2.5rem] text-left font-black uppercase text-xl text-white active:bg-orange-600 active:border-orange-800 active:translate-y-1 shadow-xl transition-all">{ing}</button>)}
+             </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ResultsView({ roomData, roomCode, role, appId }) {
+  const players = Object.values(roomData.players).sort((a,b) => b.score - a.score);
+  const isHost = role === 'HOST';
+
+  const reset = async () => {
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+    const up = { status: 'LOBBY', currentRound: 1, currentChefIndex: 0, pantry: [], deck: [], completedIngredients: [], sabotages: {}, lastChefStats: null, isChefReady: false, intermissionTimer: 0 };
+    Object.keys(roomData.players).forEach(id => { up[`players.${id}.score`] = 0; up[`players.${id}.ready`] = false; up[`players.${id}.isLockedOut`] = false; up[`players.${id}.sabotageCharges`] = 3; });
+    await updateDoc(roomRef, up);
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-stone-950 p-4 text-center overflow-y-auto">
+        <div className="flex flex-col items-center mb-8 mt-4">
+          <Trophy size={60} className="text-orange-500 mb-4 md:w-24 md:h-24" />
+          <h1 className="text-5xl md:text-8xl font-black italic uppercase text-white leading-none tracking-tighter drop-shadow-2xl">THE VERDICT</h1>
+        </div>
+        
+        <div className="w-full max-w-2xl space-y-3 mb-8">
+          {players.map((p, i) => (
+            <div key={p.id} className={`p-4 md:p-8 rounded-[2rem] border-2 md:border-4 flex justify-between items-center transition-all ${i === 0 ? 'bg-white text-black border-orange-500 scale-105 shadow-2xl' : 'bg-stone-900/50 border-stone-800'}`}>
+               <div className="flex items-center gap-4 md:gap-8">
+                 <span className={`text-3xl md:text-6xl font-black italic ${i === 0 ? 'text-orange-500' : 'opacity-20'}`}>#{i+1}</span>
+                 <p className="text-xl md:text-4xl font-black uppercase italic tracking-tighter truncate max-w-[150px] md:max-w-none">{p.name}</p>
+               </div>
+               <p className={`text-2xl md:text-5xl font-black ${i === 0 ? 'text-orange-600' : 'text-stone-500'}`}>{p.score} <span className="text-[10px] md:text-sm">PTS</span></p>
+            </div>
+          ))}
+        </div>
+        
+        {isHost && (
+          <button onClick={reset} className="mt-4 bg-orange-600 hover:bg-orange-500 text-white px-10 py-5 rounded-[2.5rem] text-xl md:text-4xl font-black uppercase active:scale-95 shadow-xl transition-all border-b-8 border-orange-800 mb-10">
+            Re-Open Kitchen
+          </button>
+        )}
+        
+        {!isHost && (
+          <div className="bg-stone-900 p-6 rounded-3xl border border-stone-800 mb-10">
+            <p className="text-stone-500 font-black uppercase tracking-widest text-xs">Waiting for Head Chef to re-open...</p>
+          </div>
+        )}
+    </div>
+  );
+}

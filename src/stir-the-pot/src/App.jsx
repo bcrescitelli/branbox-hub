@@ -1,12 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
-// This import points to the shared Hub config
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { firestore as db } from '../../firebaseConfig'; 
 import { 
   doc, onSnapshot, updateDoc, arrayUnion
 } from 'firebase/firestore';
 import { 
-  ChefHat, Users, Play, CheckCircle2, Utensils,
-  Trophy, Skull, Volume2, VolumeX, Zap, Waves,
+  ChefHat, Play, CheckCircle2, Utensils,
+  Trophy, Skull, Zap, Waves,
   Compass, HandMetal, RefreshCcw
 } from 'lucide-react';
 
@@ -26,10 +25,7 @@ const DISH_NAMES = [
 
 export default function App({ code, user, role: initialRole }) {
   const [view, setView] = useState('LOBBY'); 
-  const [role, setRole] = useState(initialRole || 'PLAYER'); 
-  const [activeRoomCode, setActiveRoomCode] = useState(code);
   const [roomData, setRoomData] = useState(null);
-  const [isMuted, setIsMuted] = useState(false);
   
   const introAudio = useRef(null);
 
@@ -37,17 +33,17 @@ export default function App({ code, user, role: initialRole }) {
     introAudio.current = new Audio('intro.mp3');
     introAudio.current.loop = true;
     introAudio.current.volume = 0.8;
+    const audioInstance = introAudio.current;
     return () => {
-      if (introAudio.current) {
-        introAudio.current.pause();
-        introAudio.current = null;
+      if (audioInstance) {
+        audioInstance.pause();
       }
     };
   }, []);
 
   useEffect(() => {
-    if (!activeRoomCode || !user) return;
-    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', activeRoomCode);
+    if (!code || !user) return;
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', code);
     const unsubscribe = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
@@ -63,7 +59,7 @@ export default function App({ code, user, role: initialRole }) {
       }
     });
     return () => unsubscribe();
-  }, [activeRoomCode, user]);
+  }, [code, user]);
 
   const requestPermissions = async () => {
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
@@ -80,10 +76,10 @@ export default function App({ code, user, role: initialRole }) {
 
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 font-sans selection:bg-orange-500 overflow-hidden">
-      {view === 'LOBBY' && <LobbyView roomCode={activeRoomCode} roomData={roomData} role={role} user={user} appId={appId} />}
-      {view === 'INTERMISSION' && <IntermissionView roomCode={activeRoomCode} roomData={roomData} role={role} user={user} appId={appId} requestPermissions={requestPermissions} />}
-      {view === 'PLAYING' && <GameView roomCode={activeRoomCode} roomData={roomData} user={user} role={role} appId={appId} />}
-      {view === 'RESULTS' && <ResultsView roomData={roomData} roomCode={activeRoomCode} role={role} appId={appId} />}
+      {view === 'LOBBY' && <LobbyView roomCode={code} roomData={roomData} role={initialRole} user={user} appId={appId} />}
+      {view === 'INTERMISSION' && <IntermissionView roomCode={code} roomData={roomData} role={initialRole} user={user} appId={appId} requestPermissions={requestPermissions} />}
+      {view === 'PLAYING' && <GameView roomCode={code} roomData={roomData} user={user} role={initialRole} appId={appId} />}
+      {view === 'RESULTS' && <ResultsView roomData={roomData} roomCode={code} role={initialRole} appId={appId} />}
     </div>
   );
 }
@@ -145,7 +141,6 @@ function LobbyView({ roomCode, roomData, role, user, appId }) {
           </div>
           <div className="text-right">
             <h2 className="text-5xl font-black italic text-orange-500 uppercase tracking-tighter">Kitchen Lobby</h2>
-            <p className="text-stone-500 font-bold uppercase tracking-[0.3em] text-sm mt-2 animate-pulse">Wait for Staff...</p>
           </div>
         </div>
         <div className="grid grid-cols-4 gap-6 w-full">
@@ -197,13 +192,7 @@ function IntermissionView({ roomCode, roomData, role, user, appId, requestPermis
   const lastChefStats = roomData.lastChefStats;
   const countdownInterval = useRef(null);
 
-  useEffect(() => {
-    if (isHost && roomData.isChefReady && roomData.intermissionTimer === 0) {
-      startCountdown();
-    }
-  }, [roomData.isChefReady, isHost]);
-
-  const startCountdown = async () => {
+  const startCountdown = useCallback(async () => {
     const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
     let count = 5;
     await updateDoc(roomRef, { intermissionTimer: count });
@@ -218,7 +207,13 @@ function IntermissionView({ roomCode, roomData, role, user, appId, requestPermis
         await updateDoc(roomRef, { intermissionTimer: count });
       }
     }, 1000);
-  };
+  }, [appId, roomCode]);
+
+  useEffect(() => {
+    if (isHost && roomData.isChefReady && roomData.intermissionTimer === 0) {
+      startCountdown();
+    }
+  }, [roomData.isChefReady, roomData.intermissionTimer, isHost, startCountdown]);
 
   const handleChefReady = async () => {
     await requestPermissions();
@@ -293,11 +288,11 @@ function GameView({ roomCode, roomData, user, role, appId }) {
     await updateDoc(roomRef, updates);
   };
 
-  const finishSab = async () => {
+  const finishSab = useCallback(async () => {
     const updates = {}; updates[`sabotages.${user.uid}`] = null;
     await updateDoc(roomRef, updates);
     setSabProgress(0);
-  };
+  }, [roomRef, user.uid]);
 
   const skipIngredient = async () => {
     if (!isChef) return;
@@ -314,23 +309,27 @@ function GameView({ roomCode, roomData, user, role, appId }) {
     if (!sab) return;
     if (sab.type === 'SCRUB') {
       const handleMotion = (e) => {
-        const { x, y, z } = e.accelerationIncludingGravity || { x:0, y:0, z:0 };
+        const { x, y } = e.accelerationIncludingGravity || { x:0, y:0, z:0 };
         if (Math.abs(x - motionRef.current.lastX) + Math.abs(y - motionRef.current.lastY) > 15) {
           setSabProgress(p => { if (p >= 100) { finishSab(); return 100; } return p + 2.5; });
         }
-        motionRef.current = { lastX: x, lastY: y, lastZ: z };
+        motionRef.current = { lastX: x, lastY: y };
       };
       window.addEventListener('devicemotion', handleMotion);
       return () => window.removeEventListener('devicemotion', handleMotion);
     }
-  }, [roomData.sabotages?.[user.uid]]);
+  }, [roomData.sabotages, user.uid, finishSab]);
 
-  useEffect(() => {
-    if (isHost && roomData.activeChefId && roomData.timer === 0) startTurn();
-    return () => clearInterval(timerInterval.current);
-  }, [roomData.activeChefId, isHost]);
+  const endShift = useCallback(async () => {
+    const nextIdx = roomData.currentChefIndex + 1;
+    const stats = { name: roomData.players[roomData.activeChefId]?.name, count: roomData.chefSuccessCount };
+    if (nextIdx >= roomData.turnOrder.length) {
+      if (roomData.currentRound < 3) await updateDoc(roomRef, { status: 'INTERMISSION', currentRound: roomData.currentRound + 1, currentChefIndex: 0, activeChefId: roomData.turnOrder[0], timer: 0, lastChefStats: stats, isChefReady: false });
+      else await updateDoc(roomRef, { status: 'GAME_OVER' });
+    } else await updateDoc(roomRef, { status: 'INTERMISSION', currentChefIndex: nextIdx, activeChefId: roomData.turnOrder[nextIdx], timer: 0, lastChefStats: stats, isChefReady: false });
+  }, [roomData, roomRef]);
 
-  const startTurn = async () => {
+  const startTurn = useCallback(async () => {
     const currentDeck = roomData.deck || [];
     const ingredient = currentDeck[0] || roomData.pantry[0];
     await updateDoc(roomRef, {
@@ -349,22 +348,18 @@ function GameView({ roomCode, roomData, user, role, appId }) {
       if (lt <= 0) { clearInterval(timerInterval.current); endShift(); }
       else await updateDoc(roomRef, { timer: lt });
     }, 1000);
-  };
+  }, [roomData, roomRef, endShift]);
 
-  const endShift = async () => {
-    const nextIdx = roomData.currentChefIndex + 1;
-    const stats = { name: roomData.players[roomData.activeChefId]?.name, count: roomData.chefSuccessCount };
-    if (nextIdx >= roomData.turnOrder.length) {
-      if (roomData.currentRound < 3) await updateDoc(roomRef, { status: 'INTERMISSION', currentRound: roomData.currentRound + 1, currentChefIndex: 0, activeChefId: roomData.turnOrder[0], timer: 0, lastChefStats: stats, isChefReady: false });
-      else await updateDoc(roomRef, { status: 'GAME_OVER' });
-    } else await updateDoc(roomRef, { status: 'INTERMISSION', currentChefIndex: nextIdx, activeChefId: roomData.turnOrder[nextIdx], timer: 0, lastChefStats: stats, isChefReady: false });
-  };
+  useEffect(() => {
+    if (isHost && roomData.activeChefId && roomData.timer === 0) startTurn();
+    return () => clearInterval(timerInterval.current);
+  }, [roomData.activeChefId, roomData.timer, isHost, startTurn]);
 
   useEffect(() => {
     if (!isHost && roomData.status === 'PLAYING') {
       setPantryShuffle([...roomData.pantry].sort(() => Math.random() - 0.5));
     }
-  }, [roomData.currentIngredient, isHost, roomData.status]);
+  }, [roomData.currentIngredient, roomData.status, roomData.pantry, isHost]);
 
   useEffect(() => { if (roomData.timer > 0) setTimeLeft(roomData.timer); }, [roomData.timer]);
 
@@ -419,7 +414,6 @@ function GameView({ roomCode, roomData, user, role, appId }) {
                 {Object.entries(roomData.sabotages || {}).map(([sid, sab]) => sab && (
                   <div key={sid} className="flex items-center gap-4 animate-bounce"><Waves className="text-blue-500" size={32} /><p className="font-black text-2xl uppercase italic text-blue-400 truncate">{roomData.players[sid]?.name} IS REELING!</p></div>
                 ))}
-                {Object.values(roomData.sabotages || {}).every(s => !s) && <p className="text-stone-800 font-black uppercase italic py-8 text-center tracking-widest text-xl opacity-30">Pantry is Quiet...</p>}
               </div>
             </div>
             <div className="flex-1 bg-stone-900 p-8 rounded-[3rem] border-2 border-stone-800 shadow-xl overflow-y-auto">
