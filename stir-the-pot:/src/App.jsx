@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-// Import the shared database from your hub
 import { firestore as db } from '../../src/firebaseConfig'; 
 import { 
   doc, setDoc, onSnapshot, updateDoc, arrayUnion, getDoc 
@@ -11,54 +10,25 @@ import {
 } from 'lucide-react';
 
 const appId = 'stir-the-pot-game';
-
-// --- Constants ---
 const ROUND_TIME = 45;
-const DISH_NAMES = [
-  "The Sunday Morning Mistake",
-  "The Boss's Retirement Party",
-  "A Wedding to Forget",
-  "Last Night's Regrets",
-  "The Health Inspector's Nightmare",
-  "Roommate's Mystery Tupperware",
-  "The First Date Disaster",
-  "Midnight Gas Station Run",
-  "Grandma's Secret 'Medicine'"
-];
+const DISH_NAMES = ["The Sunday Morning Mistake", "The Boss's Retirement Party", "A Wedding to Forget", "Last Night's Regrets", "The Health Inspector's Nightmare", "Roommate's Mystery Tupperware", "The First Date Disaster", "Midnight Gas Station Run", "Grandma's Secret 'Medicine'"];
 
-const generateRoomCode = () => Math.random().toString(36).substring(2, 6).toUpperCase();
-
-// --- Main App Component ---
 export default function App({ code, user, role: initialRole }) {
   const [view, setView] = useState('LOBBY'); 
-  const [role, setRole] = useState(initialRole); 
+  const [role, setRole] = useState(initialRole || 'PLAYER'); 
   const [activeRoomCode, setActiveRoomCode] = useState(code);
   const [roomData, setRoomData] = useState(null);
   const [error, setError] = useState('');
   const [isMuted, setIsMuted] = useState(false);
-  const [playerName, setPlayerName] = useState(''); 
   
   const introAudio = useRef(null);
 
-  // KEEP THIS: Audio Setup
   useEffect(() => {
     introAudio.current = new Audio('intro.mp3');
     introAudio.current.loop = true;
     introAudio.current.volume = 0.8;
-    return () => {
-      if (introAudio.current) {
-        introAudio.current.pause();
-        introAudio.current = null;
-      }
-    };
+    return () => { if (introAudio.current) { introAudio.current.pause(); introAudio.current = null; } };
   }, []);
-
-  // THE AUTH BLOCK WAS HERE - IT IS NOW GONE
-
-  // KEEP THIS: Database Sync Logic (This is your next block)
-  useEffect(() => {
-    if (!activeRoomCode || !user) return;
-    // ... the rest of your database syncing code
 
   useEffect(() => {
     if (!activeRoomCode || !user) return;
@@ -67,102 +37,23 @@ export default function App({ code, user, role: initialRole }) {
       if (snapshot.exists()) {
         const data = snapshot.data();
         setRoomData(data);
-        const isParticipant = data.hostId === user.uid || (data.players && data.players[user.uid]);
-        if (isParticipant) {
-          if (data.status === 'LOBBY') setView('LOBBY');
-          if (data.status === 'INTERMISSION') setView('INTERMISSION');
-          if (data.status === 'PLAYING') setView('PLAYING');
-          if (data.status === 'GAME_OVER') setView('RESULTS');
-          
-          if (introAudio.current) {
-            introAudio.current.volume = data.status === 'PLAYING' ? 0.15 : 0.7;
-          }
-        }
-      } else if (role === 'PLAYER') {
-        setError('Kitchen closed.');
-        setView('LANDING');
+        if (data.status === 'LOBBY') setView('LOBBY');
+        if (data.status === 'INTERMISSION') setView('INTERMISSION');
+        if (data.status === 'PLAYING') setView('PLAYING');
+        if (data.status === 'GAME_OVER') setView('RESULTS');
       }
-    }, (err) => console.error("Sync Error:", err));
+    });
     return () => unsubscribe();
-  }, [activeRoomCode, user, role]);
+  }, [activeRoomCode, user]);
 
   const requestPermissions = async () => {
-    // Both Motion and Orientation are needed for different sabotages
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
       try { await DeviceMotionEvent.requestPermission(); } catch(e) { console.error(e); }
     }
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-      try { await DeviceOrientationEvent.requestPermission(); } catch(e) { console.error(e); }
-    }
   };
-
-  const createRoom = async () => {
-    if (!user) return;
-    const newCode = generateRoomCode();
-    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', newCode);
-    const initialData = {
-      code: newCode,
-      status: 'LOBBY',
-      hostId: user.uid,
-      players: {},
-      pantry: [],
-      deck: [],
-      currentRound: 1,
-      currentChefIndex: 0,
-      currentIngredient: '',
-      dishName: '',
-      timer: 0,
-      activeChefId: '',
-      completedIngredients: [],
-      chefSuccessCount: 0,
-      turnOrder: [],
-      sabotages: {},
-      lastChefStats: null,
-      isGoldenOrder: false,
-      isChefReady: false,
-      intermissionTimer: 0
-    };
-    try {
-      await setDoc(roomRef, initialData);
-      setRole('HOST');
-      setActiveRoomCode(newCode);
-      setView('LOBBY');
-      if (introAudio.current) introAudio.current.play().catch(e => console.log(e));
-    } catch (e) { setError("Failed to create room."); }
-  };
-
-  const joinRoom = async () => {
-    if (!user || !inputCode || !playerName) {
-      setError("Name and Code required.");
-      return;
-    }
-    await requestPermissions();
-    const cleanCode = inputCode.toUpperCase();
-    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', cleanCode);
-    try {
-      const snap = await getDoc(roomRef);
-      if (!snap.exists()) { setError('Room not found.'); return; }
-      const updates = {};
-      updates[`players.${user.uid}`] = {
-        id: user.uid,
-        name: playerName,
-        score: 0,
-        isLockedOut: false,
-        ready: false,
-        sabotageCharges: 3 
-      };
-      await updateDoc(roomRef, updates);
-      setRole('PLAYER');
-      setActiveRoomCode(cleanCode);
-      setView('LOBBY');
-    } catch (e) { setError("Join failed."); }
-  };
-
-  if (!user && !error) return <div className="min-h-screen bg-stone-950 flex flex-col items-center justify-center text-orange-500 font-black uppercase tracking-widest"><Utensils className="animate-spin mb-4" size={48} />Preheating...</div>;
 
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 font-sans selection:bg-orange-500 overflow-hidden">
-      {/* LANDING VIEW REMOVED - GO STRAIGHT TO LOBBY */}
       {view === 'LOBBY' && <LobbyView roomCode={activeRoomCode} roomData={roomData} role={role} user={user} appId={appId} />}
       {view === 'INTERMISSION' && <IntermissionView roomCode={activeRoomCode} roomData={roomData} role={role} user={user} appId={appId} requestPermissions={requestPermissions} />}
       {view === 'PLAYING' && <GameView roomCode={activeRoomCode} roomData={roomData} user={user} role={role} appId={appId} />}
@@ -170,6 +61,12 @@ export default function App({ code, user, role: initialRole }) {
     </div>
   );
 }
+
+// --- SUB-COMPONENTS (Keep your original code for these below) ---
+function LobbyView({ roomCode, roomData, role, user, appId }) { /* ... Paste your original LobbyView here ... */ }
+function IntermissionView({ roomCode, roomData, role, user, appId, requestPermissions }) { /* ... Paste your original IntermissionView here ... */ }
+function GameView({ roomCode, roomData, user, role, appId }) { /* ... Paste your original GameView here ... */ }
+function ResultsView({ roomData, roomCode, role, appId }) { /* ... Paste your original ResultsView here ... */ }
 
 // --- View Components ---
 
