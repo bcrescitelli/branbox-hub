@@ -1,24 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { firestore as db } from '../src/firebaseConfig'; 
+// This import points to the shared Hub config
+import { firestore as db } from '../../firebaseConfig'; 
 import { 
-  doc, setDoc, onSnapshot, updateDoc, arrayUnion, getDoc 
+  doc, onSnapshot, updateDoc, arrayUnion
 } from 'firebase/firestore';
 import { 
-  ChefHat, Users, Play, Timer, AlertCircle, CheckCircle2, Flame, Utensils,
-  Trophy, RotateCcw, Skull, Volume2, VolumeX, Zap, Star, Hand, Waves,
-  Compass, HandMetal, Dna, RefreshCcw, ArrowRight
+  ChefHat, Users, Play, CheckCircle2, Utensils,
+  Trophy, Skull, Volume2, VolumeX, Zap, Waves,
+  Compass, HandMetal, RefreshCcw
 } from 'lucide-react';
 
 const appId = 'stir-the-pot-game';
 const ROUND_TIME = 45;
-const DISH_NAMES = ["The Sunday Morning Mistake", "The Boss's Retirement Party", "A Wedding to Forget", "Last Night's Regrets", "The Health Inspector's Nightmare", "Roommate's Mystery Tupperware", "The First Date Disaster", "Midnight Gas Station Run", "Grandma's Secret 'Medicine'"];
+const DISH_NAMES = [
+  "The Sunday Morning Mistake",
+  "The Boss's Retirement Party",
+  "A Wedding to Forget",
+  "Last Night's Regrets",
+  "The Health Inspector's Nightmare",
+  "Roommate's Mystery Tupperware",
+  "The First Date Disaster",
+  "Midnight Gas Station Run",
+  "Grandma's Secret 'Medicine'"
+];
 
 export default function App({ code, user, role: initialRole }) {
   const [view, setView] = useState('LOBBY'); 
   const [role, setRole] = useState(initialRole || 'PLAYER'); 
   const [activeRoomCode, setActiveRoomCode] = useState(code);
   const [roomData, setRoomData] = useState(null);
-  const [error, setError] = useState('');
   const [isMuted, setIsMuted] = useState(false);
   
   const introAudio = useRef(null);
@@ -27,7 +37,12 @@ export default function App({ code, user, role: initialRole }) {
     introAudio.current = new Audio('intro.mp3');
     introAudio.current.loop = true;
     introAudio.current.volume = 0.8;
-    return () => { if (introAudio.current) { introAudio.current.pause(); introAudio.current = null; } };
+    return () => {
+      if (introAudio.current) {
+        introAudio.current.pause();
+        introAudio.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -41,6 +56,10 @@ export default function App({ code, user, role: initialRole }) {
         if (data.status === 'INTERMISSION') setView('INTERMISSION');
         if (data.status === 'PLAYING') setView('PLAYING');
         if (data.status === 'GAME_OVER') setView('RESULTS');
+        
+        if (introAudio.current) {
+          introAudio.current.volume = data.status === 'PLAYING' ? 0.15 : 0.7;
+        }
       }
     });
     return () => unsubscribe();
@@ -52,6 +71,13 @@ export default function App({ code, user, role: initialRole }) {
     }
   };
 
+  if (!roomData) return (
+    <div className="min-h-screen bg-stone-950 flex flex-col items-center justify-center text-orange-500 font-black uppercase tracking-widest">
+      <Utensils className="animate-spin mb-4" size={48} />
+      Preheating...
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 font-sans selection:bg-orange-500 overflow-hidden">
       {view === 'LOBBY' && <LobbyView roomCode={activeRoomCode} roomData={roomData} role={role} user={user} appId={appId} />}
@@ -62,34 +88,7 @@ export default function App({ code, user, role: initialRole }) {
   );
 }
 
-// --- SUB-COMPONENTS (Keep your original code for these below) ---
-function LobbyView({ roomCode, roomData, role, user, appId }) { /* ... Paste your original LobbyView here ... */ }
-function IntermissionView({ roomCode, roomData, role, user, appId, requestPermissions }) { /* ... Paste your original IntermissionView here ... */ }
-function GameView({ roomCode, roomData, user, role, appId }) { /* ... Paste your original GameView here ... */ }
-function ResultsView({ roomData, roomCode, role, appId }) { /* ... Paste your original ResultsView here ... */ }
-
 // --- View Components ---
-
-function LandingView({ setInputCode, inputCode, setPlayerName, createRoom, joinRoom, error }) {
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-orange-900/30 via-stone-950 to-stone-950">
-      <div className="mb-12 text-center animate-in fade-in duration-1000">
-        <div className="bg-orange-600 p-6 rounded-[2rem] rotate-12 shadow-2xl mb-8 inline-block shadow-orange-900/50">
-          <Utensils size={64} className="text-white -rotate-12" />
-        </div>
-        <h1 className="text-7xl font-black italic tracking-tighter uppercase leading-none text-white drop-shadow-2xl">Stir the <span className="text-orange-500 underline decoration-8 decoration-orange-600/50 underline-offset-8">Pot</span></h1>
-        <p className="text-stone-400 mt-6 font-bold uppercase tracking-[0.4em] text-xs">High-Stakes Kitchen Sabotage</p>
-      </div>
-      <div className="w-full max-w-sm space-y-4 bg-stone-900/60 p-8 rounded-[2.5rem] border-2 border-stone-800 backdrop-blur-xl shadow-2xl">
-        <input type="text" placeholder="CHEF NAME" className="w-full bg-stone-800 border-2 border-stone-700 rounded-xl p-4 text-center font-black text-lg uppercase focus:border-orange-500 outline-none transition-all placeholder:opacity-20" onChange={(e) => setPlayerName(e.target.value)} />
-        <input type="text" placeholder="ROOM CODE" value={inputCode} className="w-full bg-stone-800 border-2 border-stone-700 rounded-xl p-4 text-center font-black text-lg uppercase focus:border-orange-500 outline-none transition-all placeholder:opacity-20" onChange={(e) => setInputCode(e.target.value.toUpperCase())} />
-        <button onClick={joinRoom} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black py-5 rounded-xl text-xl uppercase shadow-xl transform active:scale-95 transition-all">Join Game</button>
-        <button onClick={createRoom} className="w-full bg-stone-800 text-stone-300 font-bold py-4 rounded-xl uppercase transition-all">Host on TV</button>
-        {error && <div className="text-red-500 font-black text-center text-sm bg-red-500/10 p-3 rounded-xl border border-red-500/50">{error}</div>}
-      </div>
-    </div>
-  );
-}
 
 function LobbyView({ roomCode, roomData, role, user, appId }) {
   const [items, setItems] = useState(['', '', '', '', '']);
@@ -106,7 +105,6 @@ function LobbyView({ roomCode, roomData, role, user, appId }) {
     }
     const cleanItems = items.map(i => i.trim().toUpperCase());
     const existingPantry = roomData.pantry || [];
-    
     const duplicate = cleanItems.find(i => existingPantry.includes(i));
     if (duplicate) {
       setLocalError(`DUPLICATE FOUND: "${duplicate}"`);
@@ -157,9 +155,6 @@ function LobbyView({ roomCode, roomData, role, user, appId }) {
               <p className="text-xl font-black uppercase truncate tracking-tighter">{p.name}</p>
               <p className={`text-[10px] font-black uppercase tracking-widest ${p.ready ? 'text-green-500' : 'text-stone-600'}`}>{p.ready ? 'Pantry Ready' : 'Entering 5 items...'}</p>
             </div>
-          ))}
-          {Array.from({ length: Math.max(0, 4 - players.length) }).map((_, i) => (
-             <div key={i} className="border-2 border-stone-900 border-dashed p-8 rounded-[2.5rem] flex items-center justify-center opacity-20"><Users size={32}/></div>
           ))}
         </div>
         <button disabled={players.length < 2 || !players.every(p => p.ready)} onClick={startGame} className="mt-16 px-16 py-6 bg-orange-600 text-white font-black text-3xl rounded-[2.5rem] shadow-2xl disabled:opacity-30 disabled:grayscale uppercase active:scale-95 transition-all">Start Game</button>
@@ -226,7 +221,7 @@ function IntermissionView({ roomCode, roomData, role, user, appId, requestPermis
   };
 
   const handleChefReady = async () => {
-    await requestPermissions(); // Double check permissions for the new chef
+    await requestPermissions();
     const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
     await updateDoc(roomRef, { isChefReady: true });
   };
@@ -253,14 +248,11 @@ function IntermissionView({ roomCode, roomData, role, user, appId, requestPermis
              <h3 className="text-2xl font-black italic uppercase text-white">{lastChefStats.name} prepped {lastChefStats.count} items!</h3>
           </div>
         )}
-        
         <div className="bg-orange-600 p-8 rounded-[2.5rem] shadow-xl rotate-3 mb-6 animate-bounce">
           <ChefHat size={70} className="text-white" />
         </div>
-        
         <p className="text-stone-500 font-black uppercase text-xl mb-2 tracking-[0.2em]">Next Head Chef:</p>
         <h2 className="text-6xl md:text-8xl font-black uppercase italic text-white leading-none tracking-tighter break-words px-8">{nextChefName}</h2>
-        
         {roomData.isChefReady ? (
           <div className="mt-10 w-24 h-24 rounded-full border-[6px] border-stone-800 flex items-center justify-center bg-stone-900 shadow-inner">
              <span className="text-5xl font-black text-orange-500 tabular-nums animate-pulse">{roomData.intermissionTimer || 5}</span>
@@ -288,11 +280,9 @@ function GameView({ roomCode, roomData, user, role, appId }) {
   const isChef = roomData.activeChefId === user.uid;
   const isHost = role === 'HOST';
   const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
-  
   const timerInterval = useRef(null);
   const motionRef = useRef({ lastX: 0, lastY: 0, lastZ: 0 });
 
-  // --- 1. Sabotage Suite ---
   const triggerSabotage = async (tid) => {
     if (!tid) return;
     const types = ['SCRUB', 'DIAL', 'WIPE'];
@@ -309,6 +299,16 @@ function GameView({ roomCode, roomData, user, role, appId }) {
     setSabProgress(0);
   };
 
+  const skipIngredient = async () => {
+    if (!isChef) return;
+    const deck = [...roomData.deck];
+    deck.shift(); 
+    if (deck.length === 0) deck.push(...[...roomData.pantry].sort(() => Math.random() - 0.5));
+    const up = { deck, currentIngredient: deck[0] };
+    up[`players.${user.uid}.score`] = Math.max(0, (roomData.players[user.uid]?.score || 0) - 100);
+    await updateDoc(roomRef, up);
+  };
+
   useEffect(() => {
     const sab = roomData.sabotages?.[user.uid];
     if (!sab) return;
@@ -323,17 +323,8 @@ function GameView({ roomCode, roomData, user, role, appId }) {
       window.addEventListener('devicemotion', handleMotion);
       return () => window.removeEventListener('devicemotion', handleMotion);
     }
-    if (sab.type === 'DIAL') {
-      const handleOrient = (e) => {
-        const diff = Math.abs((e.alpha || 0) - sab.targetAngle);
-        if (diff < 15) setSabProgress(p => { if (p >= 100) { finishSab(); return 100; } return p + 4.5; });
-      };
-      window.addEventListener('deviceorientation', handleOrient);
-      return () => window.removeEventListener('deviceorientation', handleOrient);
-    }
   }, [roomData.sabotages?.[user.uid]]);
 
-  // --- 2. Timer & Shift Logic (Host Only) ---
   useEffect(() => {
     if (isHost && roomData.activeChefId && roomData.timer === 0) startTurn();
     return () => clearInterval(timerInterval.current);
@@ -369,8 +360,6 @@ function GameView({ roomCode, roomData, user, role, appId }) {
     } else await updateDoc(roomRef, { status: 'INTERMISSION', currentChefIndex: nextIdx, activeChefId: roomData.turnOrder[nextIdx], timer: 0, lastChefStats: stats, isChefReady: false });
   };
 
-  // --- 3. UI Shuffling on SUCCESS ONLY ---
-  // Pantry stays persistent (doesn't lose ingredients) but the order changes for visual feedback
   useEffect(() => {
     if (!isHost && roomData.status === 'PLAYING') {
       setPantryShuffle([...roomData.pantry].sort(() => Math.random() - 0.5));
@@ -394,12 +383,10 @@ function GameView({ roomCode, roomData, user, role, appId }) {
       up[`players.${roomData.activeChefId}.score`] = (roomData.players[roomData.activeChefId]?.score || 0) + (300 * mult);
       Object.keys(roomData.players).forEach(id => { up[`players.${id}.isLockedOut`] = false; });
       await updateDoc(roomRef, up);
-      if ('vibrate' in navigator) navigator.vibrate(200);
     } else {
       const up = {}; up[`players.${user.uid}.isLockedOut`] = true;
       up[`players.${user.uid}.score`] = Math.max(0, (roomData.players[user.uid]?.score || 0) - (roomData.isGoldenOrder ? 600 : 200));
       await updateDoc(roomRef, up);
-      if ('vibrate' in navigator) navigator.vibrate([100, 50, 100]);
     }
   };
 

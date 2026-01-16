@@ -1,51 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
+// Import the shared database from your hub
+import { firestore as db } from '../../firebaseConfig'; 
 import { 
-  getAuth, 
-  signInAnonymously, 
-  onAuthStateChanged 
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  updateDoc, 
-  onSnapshot, 
-  collection, 
-  arrayUnion, 
-  runTransaction,
-  writeBatch,
-  getDocs
+  doc, setDoc, getDoc, updateDoc, onSnapshot, collection, 
+  arrayUnion, runTransaction, writeBatch, getDocs
 } from 'firebase/firestore';
 import { 
   Palette, Pencil, Trash2, Users, Timer, 
   Gavel, Image as ImageIcon, Award, CheckCircle2,
   Trophy, Coins, Volume2, VolumeX,
-  AlertCircle, History,
-  PenTool,
-  Star,
-  Target,
-  RefreshCw,
-  ArrowRightLeft,
-  Play,
-  Layers
+  AlertCircle, History, PenTool, Star, Target,
+  RefreshCw, ArrowRightLeft, Play, Layers
 } from 'lucide-react';
 
-// --- Configuration ---
-const firebaseConfig = {
-  apiKey: "AIzaSyBysJI5RAeRDiVNI36lXD8g4CmiF2tXCUk",
-  authDomain: "museum-of-modern-mistakes.firebaseapp.com",
-  projectId: "museum-of-modern-mistakes",
-  storageBucket: "museum-of-modern-mistakes.firebasestorage.app",
-  messagingSenderId: "244324872382",
-  appId: "1:244324872382:web:955dc0385a1e4177f0eeef"
-};
-
 const appId = 'museum-modern-mistakes';
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
 
 const PHASES = {
   LOBBY: 'LOBBY',
@@ -95,10 +63,6 @@ const OBJECTIVES = [
   { id: 'ANONYMOUS', title: 'Anonymous', desc: 'Win a vote from a player you outbid', bonus: 400 },
   { id: 'HIDDEN_GEM', title: 'Hidden Gem', desc: 'Own an item that was nearly a Mistake', bonus: 300 }
 ];
-
-const generateRoomCode = () => Math.random().toString(36).substring(2, 6).toUpperCase();
-
-// --- Components ---
 
 const DrawingCanvas = ({ onSave, prompt, timeLimit }) => {
   const canvasRef = useRef(null);
@@ -258,15 +222,12 @@ const DrawingCanvas = ({ onSave, prompt, timeLimit }) => {
   );
 };
 
-// --- Main App ---
-
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [view, setView] = useState('landing');
+export default function App({ code, user, role: initialRole }) {
+  const [view, setView] = useState(initialRole === 'HOST' ? 'host' : 'client');
   const [room, setRoom] = useState(null);
   const [players, setPlayers] = useState([]);
   const [items, setItems] = useState([]);
-  const [roomId, setRoomId] = useState('');
+  const [roomId, setRoomId] = useState(code);
   const [name, setName] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
   const [isMuted, setIsMuted] = useState(false);
@@ -277,16 +238,6 @@ export default function App() {
   const audioRef = useRef(null);
 
   const me = useMemo(() => players.find(p => p.id === user?.uid), [players, user?.uid]);
-
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (!u) {
-        const cred = await signInAnonymously(auth);
-        setUser(cred.user);
-      } else { setUser(u); }
-    });
-    return unsub;
-  }, []);
 
   useEffect(() => {
     if (!roomId || !user) return;
@@ -303,14 +254,12 @@ export default function App() {
     }
   }, [isMuted]);
 
-  // Reset local voted state when voting phase starts
   useEffect(() => {
     if (room?.phase === PHASES.VOTING) {
       setVoted(false);
     }
   }, [room?.phase]);
 
-  // Host logic
   useEffect(() => {
     if (view !== 'host' || !room) return;
     let timer;
@@ -380,33 +329,24 @@ export default function App() {
   const distributeAppraisals = async () => {
     const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
     const batch = writeBatch(db);
-    
-    // Sort players and items to ensure consistent ordering
     const sortedPlayers = [...players].sort((a,b) => a.id.localeCompare(b.id));
     const playerIds = sortedPlayers.map(p => p.id);
     const n = playerIds.length;
-
-    // Group items by artist
     const itemsByArtist = {};
     items.forEach(i => {
       if (!itemsByArtist[i.artistId]) itemsByArtist[i.artistId] = [];
       itemsByArtist[i.artistId].push(i.id);
     });
 
-    // FIXED: Balanced distribution: Each player i gets item [shift-1] from player (i + shift) % n
     sortedPlayers.forEach((player, i) => {
       for (let shiftCount = 1; shiftCount <= 3; shiftCount++) {
         const sourceIdx = (i + shiftCount) % n;
         let finalSourceId = playerIds[sourceIdx];
-        
-        // Handle n=1 fallback (though game requires 2+)
         if (finalSourceId === player.id) {
           finalSourceId = playerIds[(sourceIdx + 1) % n];
         }
-
         const sourceArt = itemsByArtist[finalSourceId] || [];
         const artId = sourceArt[(shiftCount - 1) % sourceArt.length];
-        
         if (artId) {
           batch.update(doc(roomRef, 'items', artId), { appraiserId: player.id });
         }
@@ -475,7 +415,7 @@ export default function App() {
       audio.play().catch(() => {});
       audioRef.current = audio;
     }
-    const code = generateRoomCode();
+    const code = roomId; 
     const commonPrompts = [...PROMPTS].sort(() => 0.5 - Math.random()).slice(0, 3);
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', code), {
       hostId: user.uid, phase: PHASES.LOBBY, theme: THEMES[Math.floor(Math.random() * THEMES.length)], currentAuction: null, phaseStartedAt: Date.now(), gamePrompts: commonPrompts, videoPlayed: false
@@ -540,28 +480,6 @@ export default function App() {
     else if (curationOrder.length < 3) { setCurationOrder(prev => [...prev, id]); }
   };
 
-  // --- Views ---
-
-  if (view === 'landing') {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white font-sans">
-        <div className="max-w-3xl w-full space-y-12 text-center animate-in fade-in zoom-in duration-700">
-          <div className="space-y-4 transform -rotate-1 text-slate-100">
-            <h1 className="text-6xl sm:text-8xl font-black tracking-tighter drop-shadow-[0_10px_10px_rgba(0,0,0,0.5)] leading-tight uppercase italic break-words">Museum of Modern Mistakes</h1>
-            <p className="text-xl font-bold text-indigo-400 tracking-[0.2em] uppercase mt-2">Fine Art for Fumbling Curators</p>
-          </div>
-          <div className="bg-slate-800 p-8 rounded-[3rem] shadow-2xl border border-slate-700 space-y-6 text-slate-900">
-            <input type="text" placeholder="Curator Name" className="w-full p-6 bg-slate-900 rounded-2xl border border-slate-700 focus:border-indigo-500 text-xl outline-none transition-all text-white" value={name} onChange={e => setName(e.target.value)} />
-            <input type="text" placeholder="Room Code" className="w-full p-6 bg-slate-900 rounded-2xl border border-slate-700 text-center font-mono text-3xl tracking-widest uppercase outline-none transition-all focus:border-indigo-500 text-white" value={roomId} onChange={e => setRoomId(e.target.value)} />
-            <button onClick={() => joinGame(roomId)} disabled={!name || !roomId} className="w-full py-6 bg-indigo-600 rounded-2xl font-black text-3xl shadow-xl hover:bg-indigo-500 disabled:opacity-50 transition-all border-b-8 border-indigo-800 active:border-b-0 active:translate-y-2 uppercase italic tracking-tighter text-white">Enter Gallery</button>
-            <div className="flex items-center gap-4 text-slate-500 py-2"><hr className="flex-1 border-slate-700" /><span>OR</span><hr className="flex-1 border-slate-700" /></div>
-            <button onClick={hostGame} className="w-full py-4 bg-slate-700 rounded-2xl font-bold hover:bg-slate-600 transition-all uppercase tracking-widest text-white">Host Exhibition</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   if (view === 'host') {
     const auctionedCount = items.filter(i => i.auctioned).length;
     const totalToAuction = items.filter(i => i.appraised).length;
@@ -575,7 +493,7 @@ export default function App() {
           </div>
           <div className="bg-white p-8 rounded-3xl shadow-2xl border-t-8 border-indigo-600 text-center transform -rotate-2">
             <p className="text-xs font-black text-slate-400 uppercase tracking-tighter mb-1 leading-none text-slate-400">Room Code</p>
-            <p className="text-6xl font-black text-slate-900 tracking-tighter leading-none">{room?.id}</p>
+            <p className="text-6xl font-black text-slate-900 tracking-tighter leading-none">{roomId}</p>
           </div>
         </div>
 
@@ -783,7 +701,6 @@ export default function App() {
 
   return (
     <div className={`min-h-[100dvh] flex flex-col max-w-md mx-auto relative overflow-hidden font-sans transition-colors duration-200 ${isPanicClient ? 'bg-red-500 animate-pulse' : 'bg-slate-50'}`}>
-      {/* Secret Mission Banner (Persistent) */}
       {me?.objective && (
         <div className="bg-indigo-600 text-white px-4 py-2 flex items-start justify-between shadow-lg z-20 border-b border-indigo-700 animate-in slide-in-from-top shrink-0 text-white text-white text-white">
           <div className="flex items-start gap-2 text-white text-white">
@@ -826,7 +743,7 @@ export default function App() {
           </div>
         ) : room.phase === PHASES.INTRO_VIDEO ? (
           <div className="p-12 text-center space-y-8 flex flex-col items-center justify-center min-h-[60vh] animate-in fade-in shrink-0 text-slate-900 text-slate-900 text-slate-900">
-             <Play size={100} className="text-indigo-500 animate-bounce text-indigo-500 text-indigo-500" />
+             <Play size={100} className="text-indigo-500 animate-bounce text-indigo-500 text-indigo-500 text-indigo-500" />
              <h3 className="text-3xl font-black text-slate-900 uppercase italic leading-tight text-slate-900 text-slate-900">Rules Briefing</h3>
              <p className="text-slate-500 font-bold uppercase tracking-widest text-xs text-slate-500 text-slate-500 text-slate-500">Watch the main screen for instructions.</p>
           </div>
@@ -939,7 +856,7 @@ export default function App() {
             <div className="text-center space-y-1 text-slate-900 text-slate-900 text-slate-900 text-slate-900"><h2 className="text-5xl font-black uppercase italic tracking-tighter leading-none text-slate-900 text-slate-900 text-slate-900 text-slate-900">Cast Your Vote</h2><p className="text-slate-400 font-black uppercase text-xs tracking-widest text-slate-900 text-slate-400 text-slate-400 text-slate-400 text-slate-400">Who curated the best wing?</p></div>
             <div className="space-y-5 text-slate-900 text-slate-900 text-slate-900">
               {players.filter(p => p.id !== user.uid && p.wingTitle).map(p => (
-                <button key={p.id} onClick={async () => { if (navigator.vibrate) navigator.vibrate(100); const pRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId, 'players', p.id); const snap = await getDoc(pRef); await updateDoc(pRef, { votes: (snap.data().votes || 0) + 1 }); setVoted(true); updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId, 'players', user.uid), { ready: true }); }} className="w-full bg-white p-4 rounded-[2.5rem] border-4 border-slate-200 shadow-xl text-left border-b-[12px] active:translate-y-2 active:border-b-0 transition-all border-indigo-100 flex items-center gap-4 text-slate-900 text-slate-900 text-slate-900 text-slate-900 text-slate-900 text-slate-900 text-slate-900"><div className="w-20 h-20 bg-slate-50 rounded-2xl p-1 overflow-hidden shrink-0 border-2 border-slate-100 text-slate-900 text-slate-900 text-slate-900 text-slate-900"><img src={items.find(i => (p.inventory || []).includes(i.id))?.image} className="w-full h-full object-contain text-slate-900 text-slate-900 text-slate-900" /></div><div className="overflow-hidden text-slate-900 text-slate-900 text-slate-900 text-slate-900"><p className="text-[11px] font-black text-indigo-400 uppercase tracking-widest mb-1 italic leading-none text-indigo-400 text-indigo-400">{p.name}'s Collection</p><p className="text-2xl font-black text-slate-800 leading-tight truncate text-slate-800 text-slate-800 text-slate-800">"{p.wingTitle}"</p></div></button>
+                <button key={p.id} onClick={async () => { if (navigator.vibrate) navigator.vibrate(100); const pRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId, 'players', p.id); const snap = await getDoc(pRef); await updateDoc(pRef, { votes: (snap.data().votes || 0) + 1 }); setVoted(true); updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId, 'players', user.uid), { ready: true }); }} className="w-full bg-white p-4 rounded-[2.5rem] border-4 border-slate-200 shadow-xl text-left border-b-[12px] active:translate-y-2 active:border-b-0 transition-all border-indigo-100 flex items-center gap-4 text-slate-900 text-slate-900 text-slate-900 text-slate-900 text-slate-900 text-slate-900 text-slate-900"><div className="w-20 h-20 bg-slate-50 rounded-2xl p-1 overflow-hidden shrink-0 border-2 border-slate-100 text-slate-900 text-slate-900 text-slate-900 text-slate-900"><img src={items.find(i => (p.inventory || []).includes(i.id))?.image} className="w-full h-full object-contain text-slate-900 text-slate-900 text-slate-900 text-slate-900" /></div><div className="overflow-hidden text-slate-900 text-slate-900 text-slate-900 text-slate-900"><p className="text-[11px] font-black text-indigo-400 uppercase tracking-widest mb-1 italic leading-none text-indigo-400 text-indigo-400">{p.name}'s Collection</p><p className="text-2xl font-black text-slate-800 leading-tight truncate text-slate-800 text-slate-800 text-slate-800">"{p.wingTitle}"</p></div></button>
               ))}
             </div>
           </div>
