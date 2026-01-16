@@ -3,11 +3,11 @@ import { auth, db } from './firebaseConfig';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { ref, onValue } from 'firebase/database';
 
-// IMPORT GAMES - MATCHING YOUR COLON FOLDER NAMES
-import StirThePot from '../stir-the-pot:/src/App.jsx';
-import DirtyLaundry from '../dirty-laundry:/src/App.jsx';
-import Museum from '../museum-of-modern-mistakes:/src/App.jsx';
-import MyPoint from '../heres-my-point-new:/src/App.jsx';
+// IMPORT GAMES - Paths updated to match renamed folders
+import StirThePot from '../stir-the-pot/src/App.jsx';
+import DirtyLaundry from '../dirty-laundry/src/App.jsx';
+import Museum from '../museum-of-modern-mistakes/src/App.jsx';
+import MyPoint from '../heres-my-point-new/src/App.jsx';
 
 import Host from './Host';
 
@@ -21,11 +21,8 @@ export default function App() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
-      if (!u) {
-        signInAnonymously(auth);
-      } else {
-        setUser(u);
-      }
+      if (!u) signInAnonymously(auth);
+      else setUser(u);
     });
     return () => unsubscribe();
   }, []);
@@ -46,9 +43,7 @@ export default function App() {
     });
   };
 
-  if (isHostView) {
-    return <Host />;
-  }
+  if (isHostView) return <Host />;
 
   if (gameType) {
     const props = { code: roomCode, user: user, role: 'PLAYER' };
@@ -73,11 +68,7 @@ export default function App() {
           maxLength={4}
           style={{ padding: '15px', fontSize: '1.5rem', textAlign: 'center', borderRadius: '10px', border: 'none' }}
         />
-        <button 
-          onClick={handleJoinRoom} 
-          disabled={isJoining}
-          style={{ padding: '15px', fontSize: '1.2rem', backgroundColor: '#00d4ff', color: 'black', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold' }}
-        >
+        <button onClick={handleJoinRoom} disabled={isJoining} style={{ padding: '15px', fontSize: '1.2rem', backgroundColor: '#00d4ff', color: 'black', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold' }}>
           {isJoining ? "JOINING..." : "JOIN GAME"}
         </button>
       </div>
